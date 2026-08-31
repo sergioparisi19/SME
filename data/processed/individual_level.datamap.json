@@ -1,0 +1,732 @@
+{
+  "datamap_version": "1.0",
+  "generated_utc": "2026-08-31T20:02:08Z",
+  "table": {
+    "name": "individual_level",
+    "file": "individual_level.parquet",
+    "unit_of_observation": "A person aged 16-74.",
+    "grain": "One row per country x year x indicator x individual-type breakdown. Breakdowns overlap; filter, never sum.",
+    "rows": 561666,
+    "primary_key": [
+      "geo",
+      "time",
+      "indicator",
+      "ind_type",
+      "dataset"
+    ]
+  },
+  "source": {
+    "provider": "Eurostat",
+    "api_base": "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data",
+    "datasets": [
+      {
+        "code": "isoc_ai_iaiu",
+        "label": "Individuals' use of generative AI tools",
+        "level": "individual",
+        "browser_url": "https://ec.europa.eu/eurostat/databrowser/view/isoc_ai_iaiu/default/table?lang=en",
+        "years": [
+          "2025"
+        ]
+      },
+      {
+        "code": "isoc_sk_dskl_i21",
+        "label": "Individuals' level of digital skills (2021 onwards)",
+        "level": "individual",
+        "browser_url": "https://ec.europa.eu/eurostat/databrowser/view/isoc_sk_dskl_i21/default/table?lang=en",
+        "years": [
+          "2021",
+          "2023",
+          "2025"
+        ]
+      }
+    ]
+  },
+  "scope": {
+    "geo": [
+      "EU27_2020",
+      "AT",
+      "BE",
+      "BG",
+      "CY",
+      "CZ",
+      "DE",
+      "DK",
+      "EE",
+      "EL",
+      "ES",
+      "FI",
+      "FR",
+      "HR",
+      "HU",
+      "IE",
+      "IT",
+      "LT",
+      "LU",
+      "LV",
+      "MT",
+      "NL",
+      "PL",
+      "PT",
+      "RO",
+      "SE",
+      "SI",
+      "SK",
+      "NO",
+      "AL",
+      "BA",
+      "ME",
+      "MK",
+      "RS"
+    ],
+    "time": null
+  },
+  "columns": {
+    "geo": {
+      "label": "Country or aggregate",
+      "role": "dimension",
+      "dtype": "str",
+      "nullable": false,
+      "null_count": 0,
+      "distinct": 34,
+      "codes": {
+        "AL": "Albania",
+        "AT": "Austria",
+        "BA": "Bosnia and Herzegovina",
+        "BE": "Belgium",
+        "BG": "Bulgaria",
+        "CY": "Cyprus",
+        "CZ": "Czechia",
+        "DE": "Germany",
+        "DK": "Denmark",
+        "EE": "Estonia",
+        "EL": "Greece",
+        "ES": "Spain",
+        "EU27_2020": "European Union - 27 countries (from 2020)",
+        "FI": "Finland",
+        "FR": "France",
+        "HR": "Croatia",
+        "HU": "Hungary",
+        "IE": "Ireland",
+        "IT": "Italy",
+        "LT": "Lithuania",
+        "LU": "Luxembourg",
+        "LV": "Latvia",
+        "ME": "Montenegro",
+        "MK": "North Macedonia",
+        "MT": "Malta",
+        "NL": "Netherlands",
+        "NO": "Norway",
+        "PL": "Poland",
+        "PT": "Portugal",
+        "RO": "Romania",
+        "RS": "Serbia",
+        "SE": "Sweden",
+        "SI": "Slovenia",
+        "SK": "Slovakia"
+      }
+    },
+    "time": {
+      "label": "Reference year",
+      "role": "dimension",
+      "dtype": "str",
+      "nullable": false,
+      "null_count": 0,
+      "distinct": 3,
+      "codes": {
+        "2021": "2021",
+        "2023": "2023",
+        "2025": "2025"
+      }
+    },
+    "indicator": {
+      "label": "Measured indicator",
+      "role": "dimension",
+      "dtype": "str",
+      "nullable": false,
+      "null_count": 0,
+      "distinct": 58,
+      "note": "Composite of the Eurostat indicator code and its unit, joined by '|'. Both parts are required: several indicators share an indic_is code and differ only by unit.",
+      "codes": {
+        "I_DSK2_AB|PC_IND": {
+          "indic_is": "I_DSK2_AB",
+          "indic_is_label": "Individuals with above basic overall digital skills (all five component indicators are at above basic level)",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_AB|PC_IND_IU3": {
+          "indic_is": "I_DSK2_AB",
+          "indic_is_label": "Individuals with above basic overall digital skills (all five component indicators are at above basic level)",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_BAB|PC_IND": {
+          "indic_is": "I_DSK2_BAB",
+          "indic_is_label": "Individuals with basic or above basic overall digital skills (all five component indicators are at basic or above basic level)",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_BAB|PC_IND_IU3": {
+          "indic_is": "I_DSK2_BAB",
+          "indic_is_label": "Individuals with basic or above basic overall digital skills (all five component indicators are at basic or above basic level)",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_B|PC_IND": {
+          "indic_is": "I_DSK2_B",
+          "indic_is_label": "Individuals with basic overall digital skills (all five component indicators are at basic or above basic level, without being all above basic)",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_B|PC_IND_IU3": {
+          "indic_is": "I_DSK2_B",
+          "indic_is_label": "Individuals with basic overall digital skills (all five component indicators are at basic or above basic level, without being all above basic)",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_CC_AB|PC_IND": {
+          "indic_is": "I_DSK2_CC_AB",
+          "indic_is_label": "Individuals with above basic communication and collaboration skills",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_CC_AB|PC_IND_IU3": {
+          "indic_is": "I_DSK2_CC_AB",
+          "indic_is_label": "Individuals with above basic communication and collaboration skills",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_CC_BAB|PC_IND": {
+          "indic_is": "I_DSK2_CC_BAB",
+          "indic_is_label": "Individuals with basic or above basic communication and collaboration skills",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_CC_BAB|PC_IND_IU3": {
+          "indic_is": "I_DSK2_CC_BAB",
+          "indic_is_label": "Individuals with basic or above basic communication and collaboration skills",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_CC_B|PC_IND": {
+          "indic_is": "I_DSK2_CC_B",
+          "indic_is_label": "Individuals with basic communication and collaboration skills",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_CC_B|PC_IND_IU3": {
+          "indic_is": "I_DSK2_CC_B",
+          "indic_is_label": "Individuals with basic communication and collaboration skills",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_DCC_AB|PC_IND": {
+          "indic_is": "I_DSK2_DCC_AB",
+          "indic_is_label": "Individuals with above basic digital content creation skills",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_DCC_AB|PC_IND_IU3": {
+          "indic_is": "I_DSK2_DCC_AB",
+          "indic_is_label": "Individuals with above basic digital content creation skills",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_DCC_BAB|PC_IND": {
+          "indic_is": "I_DSK2_DCC_BAB",
+          "indic_is_label": "Individuals with basic or above basic digital content creation skills",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_DCC_BAB|PC_IND_IU3": {
+          "indic_is": "I_DSK2_DCC_BAB",
+          "indic_is_label": "Individuals with basic or above basic digital content creation skills",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_DCC_B|PC_IND": {
+          "indic_is": "I_DSK2_DCC_B",
+          "indic_is_label": "Individuals with basic digital content creation skills",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_DCC_B|PC_IND_IU3": {
+          "indic_is": "I_DSK2_DCC_B",
+          "indic_is_label": "Individuals with basic digital content creation skills",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_IC_S|PC_IND": {
+          "indic_is": "I_DSK2_IC_S",
+          "indic_is_label": "Individuals with online information and communication skills",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_IC_S|PC_IND_IU3": {
+          "indic_is": "I_DSK2_IC_S",
+          "indic_is_label": "Individuals with online information and communication skills",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_IL_AB|PC_IND": {
+          "indic_is": "I_DSK2_IL_AB",
+          "indic_is_label": "Individuals with above basic information and data literacy skills",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_IL_AB|PC_IND_IU3": {
+          "indic_is": "I_DSK2_IL_AB",
+          "indic_is_label": "Individuals with above basic information and data literacy skills",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_IL_BAB|PC_IND": {
+          "indic_is": "I_DSK2_IL_BAB",
+          "indic_is_label": "Individuals with basic or above basic information and data literacy skills",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_IL_BAB|PC_IND_IU3": {
+          "indic_is": "I_DSK2_IL_BAB",
+          "indic_is_label": "Individuals with basic or above basic information and data literacy skills",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_IL_B|PC_IND": {
+          "indic_is": "I_DSK2_IL_B",
+          "indic_is_label": "Individuals with basic information and data literacy skills",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_IL_B|PC_IND_IU3": {
+          "indic_is": "I_DSK2_IL_B",
+          "indic_is_label": "Individuals with basic information and data literacy skills",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_LM|PC_IND": {
+          "indic_is": "I_DSK2_LM",
+          "indic_is_label": "Individuals with limited overall digital skills (two out of five component indicators are at basic or above basic level)",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_LM|PC_IND_IU3": {
+          "indic_is": "I_DSK2_LM",
+          "indic_is_label": "Individuals with limited overall digital skills (two out of five component indicators are at basic or above basic level)",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_LW|PC_IND": {
+          "indic_is": "I_DSK2_LW",
+          "indic_is_label": "Individuals with low overall digital skills (four out of five component indicators are at basic or above basic level)",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_LW|PC_IND_IU3": {
+          "indic_is": "I_DSK2_LW",
+          "indic_is_label": "Individuals with low overall digital skills (four out of five component indicators are at basic or above basic level)",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_NA|PC_IND": {
+          "indic_is": "I_DSK2_NA",
+          "indic_is_label": "Digital skills could not be assessed because the individual has not used the internet in the last 3 months",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_N|PC_IND": {
+          "indic_is": "I_DSK2_N",
+          "indic_is_label": "Individuals with narrow overall digital skills (three out of five component indicators are at basic or above basic level)",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_N|PC_IND_IU3": {
+          "indic_is": "I_DSK2_N",
+          "indic_is_label": "Individuals with narrow overall digital skills (three out of five component indicators are at basic or above basic level)",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_PS_AB|PC_IND": {
+          "indic_is": "I_DSK2_PS_AB",
+          "indic_is_label": "Individuals with above basic problem solving skills",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_PS_AB|PC_IND_IU3": {
+          "indic_is": "I_DSK2_PS_AB",
+          "indic_is_label": "Individuals with above basic problem solving skills",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_PS_BAB|PC_IND": {
+          "indic_is": "I_DSK2_PS_BAB",
+          "indic_is_label": "Individuals with basic or above basic problem solving skills",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_PS_BAB|PC_IND_IU3": {
+          "indic_is": "I_DSK2_PS_BAB",
+          "indic_is_label": "Individuals with basic or above basic problem solving skills",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_PS_B|PC_IND": {
+          "indic_is": "I_DSK2_PS_B",
+          "indic_is_label": "Individuals with basic problem solving skills",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_PS_B|PC_IND_IU3": {
+          "indic_is": "I_DSK2_PS_B",
+          "indic_is_label": "Individuals with basic problem solving skills",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_SF_AB|PC_IND": {
+          "indic_is": "I_DSK2_SF_AB",
+          "indic_is_label": "Individuals with above basic safety skills",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_SF_AB|PC_IND_IU3": {
+          "indic_is": "I_DSK2_SF_AB",
+          "indic_is_label": "Individuals with above basic safety skills",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_SF_BAB|PC_IND": {
+          "indic_is": "I_DSK2_SF_BAB",
+          "indic_is_label": "Individuals with basic or above basic safety skills",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_SF_BAB|PC_IND_IU3": {
+          "indic_is": "I_DSK2_SF_BAB",
+          "indic_is_label": "Individuals with basic or above basic safety skills",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_SF_B|PC_IND": {
+          "indic_is": "I_DSK2_SF_B",
+          "indic_is_label": "Individuals with basic safety skills",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_SF_B|PC_IND_IU3": {
+          "indic_is": "I_DSK2_SF_B",
+          "indic_is_label": "Individuals with basic safety skills",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_DSK2_X|PC_IND": {
+          "indic_is": "I_DSK2_X",
+          "indic_is_label": "Individuals with no overall digital skills",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_DSK2_X|PC_IND_IU3": {
+          "indic_is": "I_DSK2_X",
+          "indic_is_label": "Individuals with no overall digital skills",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_IUAIFE|PC_IND": {
+          "indic_is": "I_IUAIFE",
+          "indic_is_label": "Use of generative AI tools: for formal education",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_IUAIFE|PC_IND_IU3": {
+          "indic_is": "I_IUAIFE",
+          "indic_is_label": "Use of generative AI tools: for formal education",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_IUAIFE|PC_IND_IUAI": {
+          "indic_is": "I_IUAIFE",
+          "indic_is_label": "Use of generative AI tools: for formal education",
+          "unit": "PC_IND_IUAI",
+          "unit_label": "Percentage of individuals who have used any generative AI tools in the last 3 months"
+        },
+        "I_IUAIPR|PC_IND": {
+          "indic_is": "I_IUAIPR",
+          "indic_is_label": "Use of generative AI tools: for private purposes",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_IUAIPR|PC_IND_IU3": {
+          "indic_is": "I_IUAIPR",
+          "indic_is_label": "Use of generative AI tools: for private purposes",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_IUAIPR|PC_IND_IUAI": {
+          "indic_is": "I_IUAIPR",
+          "indic_is_label": "Use of generative AI tools: for private purposes",
+          "unit": "PC_IND_IUAI",
+          "unit_label": "Percentage of individuals who have used any generative AI tools in the last 3 months"
+        },
+        "I_IUAIWP|PC_IND": {
+          "indic_is": "I_IUAIWP",
+          "indic_is_label": "Use of generative AI tools: for professional (work) purposes",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_IUAIWP|PC_IND_IU3": {
+          "indic_is": "I_IUAIWP",
+          "indic_is_label": "Use of generative AI tools: for professional (work) purposes",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        },
+        "I_IUAIWP|PC_IND_IUAI": {
+          "indic_is": "I_IUAIWP",
+          "indic_is_label": "Use of generative AI tools: for professional (work) purposes",
+          "unit": "PC_IND_IUAI",
+          "unit_label": "Percentage of individuals who have used any generative AI tools in the last 3 months"
+        },
+        "I_IUAI|PC_IND": {
+          "indic_is": "I_IUAI",
+          "indic_is_label": "Use of generative AI tools: in the last 3 months",
+          "unit": "PC_IND",
+          "unit_label": "Percentage of individuals"
+        },
+        "I_IUAI|PC_IND_IU3": {
+          "indic_is": "I_IUAI",
+          "indic_is_label": "Use of generative AI tools: in the last 3 months",
+          "unit": "PC_IND_IU3",
+          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        }
+      }
+    },
+    "value": {
+      "label": "Observed value",
+      "role": "measure",
+      "dtype": "float64",
+      "nullable": false,
+      "null_count": 0,
+      "distinct": 10001,
+      "min": 0.0,
+      "max": 100.0,
+      "mean": 42.2438,
+      "note": "Unit varies by indicator - read it from indicator.codes[...].unit_label rather than assuming a percentage."
+    },
+    "sex": {
+      "label": "Sex",
+      "role": "dimension",
+      "dtype": "str",
+      "nullable": true,
+      "null_count": 384082,
+      "distinct": 2,
+      "codes": {
+        "F": "F",
+        "M": "M"
+      }
+    },
+    "age": {
+      "label": "Age band",
+      "role": "dimension",
+      "dtype": "str",
+      "nullable": true,
+      "null_count": 269898,
+      "distinct": 17,
+      "codes": {
+        "Y0_15": "Y0_15",
+        "Y16_17": "Y16_17",
+        "Y16_19": "Y16_19",
+        "Y16_24": "Y16_24",
+        "Y16_29": "Y16_29",
+        "Y16_74": "Y16_74",
+        "Y20_24": "Y20_24",
+        "Y25_29": "Y25_29",
+        "Y25_34": "Y25_34",
+        "Y25_54": "Y25_54",
+        "Y25_64": "Y25_64",
+        "Y35_44": "Y35_44",
+        "Y45_54": "Y45_54",
+        "Y55_64": "Y55_64",
+        "Y55_74": "Y55_74",
+        "Y65_74": "Y65_74",
+        "Y75_89": "Y75_89"
+      }
+    },
+    "education": {
+      "label": "Education level",
+      "role": "dimension",
+      "dtype": "str",
+      "nullable": true,
+      "null_count": 435292,
+      "distinct": 3,
+      "codes": {
+        "HIGH": "HIGH",
+        "LOW": "LOW",
+        "MEDIUM": "MEDIUM"
+      }
+    },
+    "ind_type": {
+      "label": "Individual type (raw Eurostat breakdown code)",
+      "role": "dimension",
+      "dtype": "str",
+      "nullable": false,
+      "null_count": 0,
+      "distinct": 139,
+      "note": "Eurostat packs sex, age, education, labour status and citizenship into this one dimension. The sex/age/education columns decode the demographic subset; codes expressing something else decode to null.",
+      "codes": {
+        "CB_EU_FOR": "Individuals who are born in another EU Member State",
+        "CB_EXT_EU": "Individuals who are born in non-EU country",
+        "CB_FOR": "Individuals who are foreign-born",
+        "CB_NAT": "Individuals who are native-born",
+        "CC_EU_FOR": "Nationals of another EU-Member State",
+        "CC_EXT_EU": "Nationals of non-EU country",
+        "CC_FOR": "Non-nationals",
+        "CC_NAT": "Nationals",
+        "EMPL_UNE": "Individuals in the labour force (employed and unemployed)",
+        "EMP_A": "Persons aged 16-74 working in agriculture, forestry or fishing",
+        "EMP_B": "Persons aged 16-74 working in mining or quarrying",
+        "EMP_C": "Persons aged 16-74 working in manufacturing",
+        "EMP_CON_PRM": "Working with a permanent job or under contract of unlimited duration",
+        "EMP_CON_TMP": "Working with a temporary job or under contract of limited duration",
+        "EMP_D": "Persons aged 16-74 working in electricity, gas, steam or air conditioning supply",
+        "EMP_E": "Persons aged 16-74 working in water supply; sewerage, waste management or remediation activities",
+        "EMP_F": "Persons aged 16-74 working in the construction",
+        "EMP_G": "Persons aged 16-74 working in wholesale or retail trade, or in the repair of motor vehicles and motorcycles",
+        "EMP_H": "Persons aged 16-74 working in transportation and storage",
+        "EMP_I": "Persons aged 16-74 working in accommodation or food service activities",
+        "EMP_J": "Persons aged 16-74 working in information and communication",
+        "EMP_K": "Persons aged 16-74 working in financial or insurance activities",
+        "EMP_L": "Persons aged 16-74 working in real estate activities",
+        "EMP_M": "Persons aged 16-74 working in professional, scientific or technical activities",
+        "EMP_N": "Persons aged 16-74 working in administrative or support service activities",
+        "EMP_O": "Persons aged 16-74 working in public administration, defence or compulsory social security",
+        "EMP_P": "Persons aged 16-74 working in education",
+        "EMP_Q": "Persons aged 16-74 working in human health or social work activities",
+        "EMP_R": "Persons aged 16-74 working in arts, entertainment or recreation",
+        "EMP_S": "Persons aged 16-74 working in other service activities",
+        "EMP_WKT_FT": "Employees working full time",
+        "EMP_WKT_PT": "Employees working part time",
+        "FAM": "Family and relatives",
+        "F_I0_2": "Females with low formal education",
+        "F_I0_2_75_89": "Females 75-89 with no or low education",
+        "F_I3_4": "Females with medium formal education",
+        "F_I3_4_75_89": "Females 75-89 with medium education",
+        "F_I5_8": "Females with high formal education",
+        "F_I5_8_75_89": "Females 75-89 with high education",
+        "F_Y16_19": "Females, 16 to 19 years old",
+        "F_Y16_24": "Females, 16 to 24 years old",
+        "F_Y16_29": "Females, 16 to 29 years old",
+        "F_Y16_74": "Females, 16 to 74 years old",
+        "F_Y20_24": "Females, 20 to 24 years old",
+        "F_Y25_29": "Females, 25 to 29 years old",
+        "F_Y25_34": "Females, 25 to 34 years old",
+        "F_Y25_54": "Females 25 to 54 years old",
+        "F_Y25_64": "Females, 25 to 64 years old",
+        "F_Y35_44": "Females 35 to 44 years old",
+        "F_Y45_54": "Females 45 to 54 years old",
+        "F_Y55_64": "Females 55 to 64 years old",
+        "F_Y55_74": "Females 55 to 74 years old",
+        "F_Y65_74": "Females 65 to 74 years old",
+        "F_Y75_89": "Females 75-89",
+        "I0_2": "Individuals with no or low formal education",
+        "I3_4": "Individuals with medium formal education",
+        "I5_8": "Individuals with high formal education",
+        "IND_BROAD": "Individuals living in a household with broadband access",
+        "IND_BROADX": "Individuals living in a household with Internet access but with no broadband access",
+        "IND_DCH": "Individuals living in a household with children",
+        "IND_DEG1": "Individuals living in cities",
+        "IND_DEG2": "Individuals living in towns and suburbs",
+        "IND_DEG3": "Individuals living in rural areas",
+        "IND_NO_DCH": "Individuals living in a household without children",
+        "IND_TOTAL": "All individuals",
+        "ISCO0_5": "Non-manual including the armed forces",
+        "ISCO6_9": "Manual",
+        "ISCO_ICT": "ICT professionals",
+        "ISCO_ICTX": "Non ICT professionals",
+        "M_I0_2": "Males with low formal education",
+        "M_I0_2_75_89": "Males 75-89 with no or low education",
+        "M_I3_4": "Males with medium formal education",
+        "M_I3_4_75_89": "Males 75-89 with medium education",
+        "M_I5_8": "Males with high formal education",
+        "M_I5_8_75_89": "Males 75-89 with high education",
+        "M_Y16_19": "Males, 16 to 19 years old",
+        "M_Y16_24": "Males, 16 to 24 years old",
+        "M_Y16_29": "Males, 16 to 29 years old",
+        "M_Y16_74": "Males, 16 to 74 years old",
+        "M_Y20_24": "Males, 20 to 24 years old",
+        "M_Y25_29": "Males, 25 to 29 years old",
+        "M_Y25_34": "Males, 25 to 34 years old",
+        "M_Y25_54": "Males 25 to 54 years old",
+        "M_Y25_64": "Males, 25 to 64 years old",
+        "M_Y35_44": "Males 35 to 44 years old",
+        "M_Y45_54": "Males 45 to 54 years old",
+        "M_Y55_64": "Males 55 to 64 years old",
+        "M_Y55_74": "Males 55 to 74 years old",
+        "M_Y65_74": "Males 65 to 74 years old",
+        "M_Y75_89": "Males 75-89",
+        "RETIR_OTHER": "Individuals who are retired or not in the labour force (excluding students)",
+        "RF_GE1": "Individuals with at least one of the 3 following characteristics: 55 to 74 years old; low education; unemployed or inactive or retired",
+        "RF_GE2": "Individuals with at least two of the 3 following characteristics: 55 to 74 years old; low education; unemployed or inactive or retired",
+        "SAL": "Employees",
+        "SAL_SELF_FAM": "Employees, self-employed, family workers",
+        "SELF_FAM": "Self-employed, family workers",
+        "SELF_NS": "Self-employed persons without employees",
+        "SELF_S": "Self-employed persons with employees",
+        "STUD": "Students",
+        "UNE": "Unemployed",
+        "Y0_15": "Individuals, 15 years old or less",
+        "Y16_17": "Individuals, 16 to 17 years old",
+        "Y16_19": "Individuals, 16 to 19 years old",
+        "Y16_24": "Individuals, 16 to 24 years old",
+        "Y16_24HI": "Individuals aged 16-24 with high formal education",
+        "Y16_24LO": "Individuals aged 16-24 with low education",
+        "Y16_24ME": "Individuals aged 16-24 with medium formal education",
+        "Y16_29": "Individuals, 16 to 29 years old",
+        "Y16_29HI": "Individuals aged 16-29 with high formal education",
+        "Y16_29LO": "Individuals aged 16-29 with low formal education",
+        "Y16_29ME": "Individuals aged 16-29 with medium formal education",
+        "Y20_24": "Individuals, 20 to 24 years old",
+        "Y25_29": "Individuals, 25 to 29 years old",
+        "Y25_34": "Individuals, 25 to 34 years old",
+        "Y25_54": "Individuals, 25 to 54 years old",
+        "Y25_54HI": "Individuals aged 25 to 54 with high formal education",
+        "Y25_54LO": "Individuals aged 25 to 54 with low formal education",
+        "Y25_54ME": "Individuals aged 25 to 54 with medium formal education",
+        "Y25_64": "Individuals, 25 to 64 years old",
+        "Y25_64HI": "Individuals aged 25 to 64 with high formal education",
+        "Y25_64LO": "Individuals aged 25 to 64 with low formal education",
+        "Y25_64ME": "Individuals aged 25 to 64 with medium formal education",
+        "Y25_64_EMPL_UNE": "Individuals aged 25 to 64 who are in the labour force (employed and unemployed)",
+        "Y25_64_RETIROTH": "Individuals aged 25 to 64 who are retired or not in the labour force (excluding students)",
+        "Y25_64_SALSELFFAM": "Individuals aged 25 to 64 who are employees, self-employed or family workers",
+        "Y25_64_UNE": "Individuals aged 25 to 64 who are unemployed",
+        "Y35_44": "Individuals, 35 to 44 years old",
+        "Y45_54": "Individuals, 45 to 54 years old",
+        "Y55_64": "Individuals, 55 to 64 years old",
+        "Y55_74": "Individuals, 55 to 74 years old",
+        "Y55_74HI": "Individuals aged 55 to 74 with high formal education",
+        "Y55_74LO": "Individuals aged 55 to 74 with low formal education",
+        "Y55_74ME": "Individuals aged 55 to 74 with medium formal education",
+        "Y65_74": "Individuals, 65 to 74 years old",
+        "Y75_89": "All persons 75-89",
+        "Y75_89HI": "Persons aged 75-89 with high education",
+        "Y75_89LO": "Persons aged 75-89 with no or low education",
+        "Y75_89ME": "Persons aged 75-89 with medium education",
+        "Y75_MAX": "Individuals, 75 years old or more"
+      }
+    },
+    "dataset": {
+      "label": "Eurostat source table",
+      "role": "dimension",
+      "dtype": "str",
+      "nullable": false,
+      "null_count": 0,
+      "distinct": 2,
+      "codes": {
+        "isoc_ai_iaiu": "Individuals' use of generative AI tools",
+        "isoc_sk_dskl_i21": "Individuals' level of digital skills (2021 onwards)"
+      }
+    }
+  },
+  "caveats": [
+    "Rows are overlapping subsets, not a partition: the same person is counted under IND_TOTAL, an age band, a sex band and an education band. Filter these rows, never sum them.",
+    "There is no population-count column. Unlike the firm-level table, these percentages cannot be converted into absolute numbers of people - no equivalent of the sbs_sc_ovw universe is wired up.",
+    "The unit of observation is a person, not a business. Never join or concatenate these rows with firm_level: comparing them is the point, merging them is a category error."
+  ]
+}
