@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from . import barrier_analysis
 from .config import PROCESSED_DIR
 
 # "docs" rather than "site": GitHub Pages' branch deployment only offers the
@@ -470,8 +471,15 @@ def export(out_dir: Path = SITE_DATA_DIR) -> dict[str, int]:
     sector_charts, sector_used = build_sector_charts(firm, unit_codes)
     individual_charts, individual_used = build_individual_charts(individual)
 
+    # Model output, not survey rows: a handful of numbers per size tier rather
+    # than a row per observation, so it rides along in series.json.
+    importance = barrier_analysis.analyse(firm)
+
     payloads = {
-        "series.json": {**firm_charts, **sector_charts, **individual_charts},
+        "series.json": {
+            **firm_charts, **sector_charts, **individual_charts,
+            "barrier_importance": importance,
+        },
         "labels.json": build_labels(
             datamaps, {"firm": firm_used | sector_used, "individual": individual_used}
         ),

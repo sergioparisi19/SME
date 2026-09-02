@@ -670,6 +670,123 @@ function ordinalBars(container, items, { unitNote, highlight = [] }) {
   container.appendChild(svg);
 }
 
+/**
+ * Exposure against importance, as a quadrant scatter.
+ *
+ * Seven labelled points, one hue - no categorical encoding, which also keeps
+ * this clear of the palette's three-slot limit for all-pairs charts. A filled
+ * marker is a barrier that moves against adoption, as a barrier should; a
+ * hollow one moves *with* it, which is a composition effect and never a driver,
+ * so the shape carries that distinction rather than a footnote.
+ */
+function scatterChart(container, points, { xLabel, yLabel, unitNote }) {
+  const padL = 56, padR = 168, padT = 22, padB = 52;
+  const width = 900, height = 430;
+  const plotW = width - padL - padR, plotH = height - padT - padB;
+  const xMax = niceScale(Math.max(...points.map((p) => p.x), 1)).max;
+  const yMax = niceScale(Math.max(...points.map((p) => p.ci?.[1] ?? p.y), 1)).max;
+  const X = (v) => padL + (v / xMax) * plotW;
+  const Y = (v) => padT + plotH - (v / yMax) * plotH;
+  const svg = el("svg", { viewBox: `0 0 ${width} ${height}`, role: "img" });
+
+  const median = (xs) => {
+    const sorted = [...xs].sort((a, b) => a - b);
+    const mid = sorted.length >> 1;
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  };
+  const mx = median(points.map((p) => p.x));
+  const my = median(points.map((p) => p.y));
+
+  // The quadrant that matters gets a wash; the other three are left plain so
+  // the eye lands on "widely cited and strongly associated" without being told.
+  svg.appendChild(el("rect", {
+    x: X(mx), y: padT, width: padL + plotW - X(mx), height: Y(my) - padT,
+    fill: `var(${SERIES_SLOTS[0]})`, "fill-opacity": 0.06,
+  }));
+  svg.appendChild(el("text", {
+    x: padL + plotW - 8, y: padT + 15, class: "quad-label", "text-anchor": "end",
+    text: "Widely cited · strongly associated",
+  }));
+  svg.appendChild(el("text", {
+    x: padL + 8, y: padT + plotH - 8, class: "quad-label", text: "Rarely cited · weakly associated",
+  }));
+
+  for (let t = 0; t <= 4; t++) {
+    const gy = padT + (t / 4) * plotH;
+    svg.appendChild(el("line", { x1: padL, x2: padL + plotW, y1: gy, y2: gy, class: "grid-line" }));
+    svg.appendChild(el("text", {
+      x: padL - 9, y: gy + 4, class: "tick-label", "text-anchor": "end",
+      text: `${+(yMax - (t / 4) * yMax).toFixed(0)}%`,
+    }));
+    const gx = padL + (t / 4) * plotW;
+    svg.appendChild(el("text", {
+      x: gx, y: height - 30, class: "tick-label", "text-anchor": "middle",
+      text: `${+((t / 4) * xMax).toFixed(0)}%`,
+    }));
+  }
+  svg.appendChild(el("line", { x1: X(mx), x2: X(mx), y1: padT, y2: padT + plotH, class: "median-line" }));
+  svg.appendChild(el("line", { x1: padL, x2: padL + plotW, y1: Y(my), y2: Y(my), class: "median-line" }));
+
+  svg.appendChild(el("text", {
+    x: padL + plotW / 2, y: height - 8, class: "axis-title", "text-anchor": "middle", text: xLabel,
+  }));
+  svg.appendChild(el("text", {
+    x: 14, y: padT + plotH / 2, class: "axis-title", "text-anchor": "middle",
+    transform: `rotate(-90 14 ${padT + plotH / 2})`, text: yLabel,
+  }));
+
+  const labels = [];
+  points.forEach((p) => {
+    const px = X(p.x), py = Y(p.y);
+    const colour = `var(${SERIES_SLOTS[p.expected ? 0 : 1]})`;
+    if (p.ci) {
+      svg.appendChild(el("line", {
+        x1: px, x2: px, y1: Y(p.ci[0]), y2: Y(p.ci[1]), class: "ci-whisker", stroke: colour,
+      }));
+    }
+    const dot = el("circle", {
+      cx: px, cy: py, r: 6, class: "mark",
+      fill: p.expected ? colour : "var(--surface)", stroke: colour, "stroke-width": 2,
+    });
+    attachTip(dot, `<div class="tt-title">${p.label}</div>
+      ${tipRow(colour, `${fmt(p.y)}% of the explained gap`)}
+      ${tipRow("var(--ink-muted)", `cited by ${fmt(p.x)}% of firms that considered AI`)}
+      ${p.ci ? `<div class="tt-base">90% interval ${fmt(p.ci[0])}–${fmt(p.ci[1])}%</div>` : ""}
+      <div class="tt-base">${p.expected
+        ? "Moves against adoption, as a barrier should."
+        : "Moves <em>with</em> adoption — a composition effect, not a driver."}</div>
+      <div class="tt-base">${unitNote}</div>`);
+    svg.appendChild(dot);
+    labels.push({ x: px + 11, y: py + 4, text: p.short, fill: colour });
+  });
+
+  // Seven labels beside seven points collide constantly, and here they cluster:
+  // one barrier dominates, so the other six sit near zero. Pushing apart
+  // downwards alone shoves the tail through the axis, so the pass runs both
+  // ways and the result is clamped inside the plot.
+  const top = padT + 6, bottom = padT + plotH - 4, gap = 15;
+  labels.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < labels.length; i++) {
+    labels[i].y = Math.max(labels[i].y, labels[i - 1].y + gap);
+  }
+  if (labels.length && labels[labels.length - 1].y > bottom) {
+    labels[labels.length - 1].y = bottom;
+    for (let i = labels.length - 2; i >= 0; i--) {
+      labels[i].y = Math.min(labels[i].y, labels[i + 1].y - gap);
+    }
+    labels.forEach((l) => { l.y = Math.max(l.y, top); });
+  }
+  labels.forEach((l) => svg.appendChild(el("text", {
+    x: l.x, y: l.y, class: "point-label", fill: l.fill, text: l.text,
+  })));
+
+  container.appendChild(svg);
+  container.appendChild(legend([
+    { label: "Moves against adoption", slot: SERIES_SLOTS[0] },
+    { label: "Moves with adoption (composition effect)", slot: SERIES_SLOTS[1] },
+  ]));
+}
+
 function legend(series) {
   const ul = el("ul", { class: "legend" });
   series.forEach((s) => {
@@ -1051,6 +1168,66 @@ function ordinalCard(root, { chartId, indicator, options, title, note, kindLabel
   });
 }
 
+/* --- barrier importance -------------------------------------------------- */
+
+/** The model output for the selected tier, or null where none was published. */
+const importanceFor = (band) => SERIES.barrier_importance?.tiers?.[band] ?? null;
+
+/** Every barrier's exposure and modelled weight, for the current selection. */
+function importancePoints(model) {
+  const year = latestYear("ai_barriers", {});
+  const f = facets()[0];
+  return Object.entries(model.barriers).map(([code, b]) => {
+    const full = label("indicator", code);
+    return {
+      code, label: full, short: shortLabel(full, 26),
+      x: facetValue("ai_barriers", code, f, year),
+      y: b.share, ci: b.interval, expected: b.sign === -1,
+    };
+  }).filter((p) => p.x !== null);
+}
+
+function importanceCard(root) {
+  const model = importanceFor(sel().band);
+  if (!model) return;
+  const points = importancePoints(model);
+  if (!points.length) return;
+
+  // The verdict is the point furthest into the priority quadrant among those
+  // that move the right way - a composition effect must never be the headline.
+  const lead = points.filter((p) => p.expected).sort((a, b) => b.y - a.y)[0];
+  if (lead) {
+    const v = el("p", { class: "verdict" });
+    v.appendChild(el("strong", { text: `${geosLabel(state.geos)}, ${dim().labelOf(sel().band)}: ` }));
+    v.appendChild(document.createTextNode(
+      `${lead.short.toLowerCase()} carries ${fmt(lead.y)}% of the gap the model explains, `
+      + `and is cited by ${fmt(lead.x)}% of the firms that considered AI and declined.`));
+    root.appendChild(v);
+  }
+
+  const odd = points.filter((p) => !p.expected).map((p) => p.short.toLowerCase());
+
+  card(root, {
+    title: `What separates high-adoption countries from low ones — ${dim().labelOf(sel().band)}`,
+    note: `Horizontal: how many firms cite the barrier here. Vertical: how much of the adoption gap between countries it accounts for, from a model of ${model.n} country-year cells across ${model.countries} countries. The model explains ${Math.round(model.delta_r2 * 100)}% of the variation beyond year effects, so the vertical axis divides that much, not everything. Whiskers are 90% bootstrap intervals over resampled countries.`
+      + (odd.length ? ` ${odd.length === 1 ? "One barrier" : `${odd.length} barriers`} (${odd.join(", ")}) move with adoption rather than against it — in countries where adoption is higher, the firms that declined cite more sophisticated reasons. That is a composition effect, not a driver, and they are drawn hollow.` : ""),
+    warn: "Association, not cause. These barriers are measured only on the firms that considered AI and declined — a group defined partly by the outcome — so nothing here says that removing a barrier would raise adoption.",
+    draw: (c) => scatterChart(c, points, {
+      xLabel: "Exposure — % of firms that considered AI and declined",
+      yLabel: "Share of the explained gap",
+      unitNote: unitNoteFor(SERIES.ai_barriers.unit),
+    }),
+    table: () => ({
+      columns: ["Barrier", "Exposure %", "Share of gap %", "90% interval", "Direction"],
+      rows: [...points].sort((a, b) => b.y - a.y).map((p) => [
+        p.label, fmt(p.x), fmt(p.y),
+        p.ci ? `${fmt(p.ci[0])}–${fmt(p.ci[1])}` : "n/a",
+        p.expected ? "against adoption" : "with adoption",
+      ]),
+    }),
+  });
+}
+
 /* --- methodology -------------------------------------------------------- */
 
 /* Plain-language versions of the datamap caveats. The originals are precise but
@@ -1072,6 +1249,8 @@ const PLAIN_NOTES = [
    "Percentages come from one survey and the number of businesses from another. The two cover slightly different populations and only overlap for 2021 to 2024, so any figure expressed as a number of companies is an estimate, not an exact count."],
   ["Some figures are simply not published",
    "Where a chart says “not published”, Eurostat measured the cell but withheld the number because too few surveyed businesses fell into it to be reliable. Italy’s energy and water sectors in 2025 are an example: too few firms of 10 or more employees for a dependable estimate. A blank therefore means “too small to measure here”, never “nobody does this” — and it happens more often in small countries and narrow sectors."],
+  ["What firms cite and what separates them are different things",
+   "One chart counts how many firms mention a barrier. Another asks which barriers actually differ between countries where adoption is high and countries where it is low. A barrier can be mentioned constantly and barely distinguish the two — and one can even move the “wrong” way, cited more where adoption is higher, because in those countries the firms that looked at AI and declined are further along and give more sophisticated reasons. Those are drawn hollow, and they are not things to fix."],
   ["A gap is not a cause",
    "This page shows where differences sit — between sizes, ages and countries. It cannot say what causes them. A country doing well may differ in a dozen ways this data never records."],
 ];
@@ -1111,7 +1290,7 @@ function renderMethodology(root) {
 
 const HOW_TO_READ = {
   id: "method", part: "Reading it", nav: "How to read this", h2: "How to read this",
-  deck: "Eight things that change what these numbers mean. They are worth two minutes before you quote any figure from this page.",
+  deck: "Nine things that change what these numbers mean. They are worth two minutes before you quote any figure from this page.",
   render: renderMethodology,
 };
 
@@ -1167,6 +1346,11 @@ const VIEWS = {
         render: (r) => comparisonCard(r, "ai_barriers", {
           title: "Why enterprises do not adopt AI",
           note: "Shares of the companies that considered AI — not of all companies, which is the group every other chart here counts. Reasons are not exclusive." }) },
+      { id: "importance", part: "Why they don't", nav: "What is worth acting on",
+        h2: "What firms cite is not what separates them",
+        deck: "The chart above says what firms complain about. This says which of those complaints actually distinguishes high-adoption countries from low-adoption ones — two different questions, with two different answers.",
+        available: () => importanceFor(sel().band) !== null && SERIES.barrier_importance,
+        render: importanceCard },
       { id: "foundations", part: "What is missing underneath", nav: "Digital foundations", h2: "The foundations underneath",
         deck: "AI adoption rarely arrives on its own. Cloud services, data analytics practice and overall digital intensity are what it tends to sit on.",
         render: (r) => comparisonCard(r, "foundations", {
