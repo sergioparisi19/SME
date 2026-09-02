@@ -1,16 +1,17 @@
 {
   "datamap_version": "1.0",
-  "generated_utc": "2026-08-31T20:02:08Z",
+  "generated_utc": "2026-08-31T21:26:08Z",
   "table": {
     "name": "individual_level",
     "file": "individual_level.parquet",
     "unit_of_observation": "A person aged 16-74.",
-    "grain": "One row per country x year x indicator x individual-type breakdown. Breakdowns overlap; filter, never sum.",
+    "grain": "One row per country x year x indicator x unit x individual-type breakdown. Breakdowns overlap; filter, never sum.",
     "rows": 561666,
     "primary_key": [
       "geo",
       "time",
       "indicator",
+      "unit",
       "ind_type",
       "dataset"
     ]
@@ -144,356 +145,62 @@
       "dtype": "str",
       "nullable": false,
       "null_count": 0,
-      "distinct": 58,
-      "note": "Composite of the Eurostat indicator code and its unit, joined by '|'. Both parts are required: several indicators share an indic_is code and differ only by unit.",
+      "distinct": 28,
+      "note": "The Eurostat indicator code (indic_is, or indic_sbs for the universe table). It does not identify a metric on its own: several metrics share one code and differ only by unit, so filter on `indicator` and `unit` together.",
       "codes": {
-        "I_DSK2_AB|PC_IND": {
-          "indic_is": "I_DSK2_AB",
-          "indic_is_label": "Individuals with above basic overall digital skills (all five component indicators are at above basic level)",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
+        "I_DSK2_AB": "Individuals with above basic overall digital skills (all five component indicators are at above basic level)",
+        "I_DSK2_B": "Individuals with basic overall digital skills (all five component indicators are at basic or above basic level, without being all above basic)",
+        "I_DSK2_BAB": "Individuals with basic or above basic overall digital skills (all five component indicators are at basic or above basic level)",
+        "I_DSK2_CC_AB": "Individuals with above basic communication and collaboration skills",
+        "I_DSK2_CC_B": "Individuals with basic communication and collaboration skills",
+        "I_DSK2_CC_BAB": "Individuals with basic or above basic communication and collaboration skills",
+        "I_DSK2_DCC_AB": "Individuals with above basic digital content creation skills",
+        "I_DSK2_DCC_B": "Individuals with basic digital content creation skills",
+        "I_DSK2_DCC_BAB": "Individuals with basic or above basic digital content creation skills",
+        "I_DSK2_IC_S": "Individuals with online information and communication skills",
+        "I_DSK2_IL_AB": "Individuals with above basic information and data literacy skills",
+        "I_DSK2_IL_B": "Individuals with basic information and data literacy skills",
+        "I_DSK2_IL_BAB": "Individuals with basic or above basic information and data literacy skills",
+        "I_DSK2_LM": "Individuals with limited overall digital skills (two out of five component indicators are at basic or above basic level)",
+        "I_DSK2_LW": "Individuals with low overall digital skills (four out of five component indicators are at basic or above basic level)",
+        "I_DSK2_N": "Individuals with narrow overall digital skills (three out of five component indicators are at basic or above basic level)",
+        "I_DSK2_NA": "Digital skills could not be assessed because the individual has not used the internet in the last 3 months",
+        "I_DSK2_PS_AB": "Individuals with above basic problem solving skills",
+        "I_DSK2_PS_B": "Individuals with basic problem solving skills",
+        "I_DSK2_PS_BAB": "Individuals with basic or above basic problem solving skills",
+        "I_DSK2_SF_AB": "Individuals with above basic safety skills",
+        "I_DSK2_SF_B": "Individuals with basic safety skills",
+        "I_DSK2_SF_BAB": "Individuals with basic or above basic safety skills",
+        "I_DSK2_X": "Individuals with no overall digital skills",
+        "I_IUAI": "Use of generative AI tools: in the last 3 months",
+        "I_IUAIFE": "Use of generative AI tools: for formal education",
+        "I_IUAIPR": "Use of generative AI tools: for private purposes",
+        "I_IUAIWP": "Use of generative AI tools: for professional (work) purposes"
+      }
+    },
+    "unit": {
+      "label": "Unit, i.e. the base population the percentage is a share of",
+      "role": "dimension",
+      "dtype": "str",
+      "nullable": false,
+      "null_count": 0,
+      "distinct": 3,
+      "note": "The other half of the metric's identity. Every unit here is a percentage; what differs is the population it is a percentage of - see codes[...].base, and codes[...].weightable for whether enterprise_count is its denominator.",
+      "codes": {
+        "PC_IND": {
+          "label": "Percentage of individuals",
+          "base": "all_individuals",
+          "weightable": false
         },
-        "I_DSK2_AB|PC_IND_IU3": {
-          "indic_is": "I_DSK2_AB",
-          "indic_is_label": "Individuals with above basic overall digital skills (all five component indicators are at above basic level)",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        "PC_IND_IU3": {
+          "label": "Percentage of individuals who used internet in the last 3 months",
+          "base": "individuals_who_used_internet_recently",
+          "weightable": false
         },
-        "I_DSK2_BAB|PC_IND": {
-          "indic_is": "I_DSK2_BAB",
-          "indic_is_label": "Individuals with basic or above basic overall digital skills (all five component indicators are at basic or above basic level)",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_BAB|PC_IND_IU3": {
-          "indic_is": "I_DSK2_BAB",
-          "indic_is_label": "Individuals with basic or above basic overall digital skills (all five component indicators are at basic or above basic level)",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_B|PC_IND": {
-          "indic_is": "I_DSK2_B",
-          "indic_is_label": "Individuals with basic overall digital skills (all five component indicators are at basic or above basic level, without being all above basic)",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_B|PC_IND_IU3": {
-          "indic_is": "I_DSK2_B",
-          "indic_is_label": "Individuals with basic overall digital skills (all five component indicators are at basic or above basic level, without being all above basic)",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_CC_AB|PC_IND": {
-          "indic_is": "I_DSK2_CC_AB",
-          "indic_is_label": "Individuals with above basic communication and collaboration skills",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_CC_AB|PC_IND_IU3": {
-          "indic_is": "I_DSK2_CC_AB",
-          "indic_is_label": "Individuals with above basic communication and collaboration skills",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_CC_BAB|PC_IND": {
-          "indic_is": "I_DSK2_CC_BAB",
-          "indic_is_label": "Individuals with basic or above basic communication and collaboration skills",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_CC_BAB|PC_IND_IU3": {
-          "indic_is": "I_DSK2_CC_BAB",
-          "indic_is_label": "Individuals with basic or above basic communication and collaboration skills",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_CC_B|PC_IND": {
-          "indic_is": "I_DSK2_CC_B",
-          "indic_is_label": "Individuals with basic communication and collaboration skills",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_CC_B|PC_IND_IU3": {
-          "indic_is": "I_DSK2_CC_B",
-          "indic_is_label": "Individuals with basic communication and collaboration skills",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_DCC_AB|PC_IND": {
-          "indic_is": "I_DSK2_DCC_AB",
-          "indic_is_label": "Individuals with above basic digital content creation skills",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_DCC_AB|PC_IND_IU3": {
-          "indic_is": "I_DSK2_DCC_AB",
-          "indic_is_label": "Individuals with above basic digital content creation skills",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_DCC_BAB|PC_IND": {
-          "indic_is": "I_DSK2_DCC_BAB",
-          "indic_is_label": "Individuals with basic or above basic digital content creation skills",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_DCC_BAB|PC_IND_IU3": {
-          "indic_is": "I_DSK2_DCC_BAB",
-          "indic_is_label": "Individuals with basic or above basic digital content creation skills",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_DCC_B|PC_IND": {
-          "indic_is": "I_DSK2_DCC_B",
-          "indic_is_label": "Individuals with basic digital content creation skills",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_DCC_B|PC_IND_IU3": {
-          "indic_is": "I_DSK2_DCC_B",
-          "indic_is_label": "Individuals with basic digital content creation skills",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_IC_S|PC_IND": {
-          "indic_is": "I_DSK2_IC_S",
-          "indic_is_label": "Individuals with online information and communication skills",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_IC_S|PC_IND_IU3": {
-          "indic_is": "I_DSK2_IC_S",
-          "indic_is_label": "Individuals with online information and communication skills",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_IL_AB|PC_IND": {
-          "indic_is": "I_DSK2_IL_AB",
-          "indic_is_label": "Individuals with above basic information and data literacy skills",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_IL_AB|PC_IND_IU3": {
-          "indic_is": "I_DSK2_IL_AB",
-          "indic_is_label": "Individuals with above basic information and data literacy skills",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_IL_BAB|PC_IND": {
-          "indic_is": "I_DSK2_IL_BAB",
-          "indic_is_label": "Individuals with basic or above basic information and data literacy skills",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_IL_BAB|PC_IND_IU3": {
-          "indic_is": "I_DSK2_IL_BAB",
-          "indic_is_label": "Individuals with basic or above basic information and data literacy skills",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_IL_B|PC_IND": {
-          "indic_is": "I_DSK2_IL_B",
-          "indic_is_label": "Individuals with basic information and data literacy skills",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_IL_B|PC_IND_IU3": {
-          "indic_is": "I_DSK2_IL_B",
-          "indic_is_label": "Individuals with basic information and data literacy skills",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_LM|PC_IND": {
-          "indic_is": "I_DSK2_LM",
-          "indic_is_label": "Individuals with limited overall digital skills (two out of five component indicators are at basic or above basic level)",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_LM|PC_IND_IU3": {
-          "indic_is": "I_DSK2_LM",
-          "indic_is_label": "Individuals with limited overall digital skills (two out of five component indicators are at basic or above basic level)",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_LW|PC_IND": {
-          "indic_is": "I_DSK2_LW",
-          "indic_is_label": "Individuals with low overall digital skills (four out of five component indicators are at basic or above basic level)",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_LW|PC_IND_IU3": {
-          "indic_is": "I_DSK2_LW",
-          "indic_is_label": "Individuals with low overall digital skills (four out of five component indicators are at basic or above basic level)",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_NA|PC_IND": {
-          "indic_is": "I_DSK2_NA",
-          "indic_is_label": "Digital skills could not be assessed because the individual has not used the internet in the last 3 months",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_N|PC_IND": {
-          "indic_is": "I_DSK2_N",
-          "indic_is_label": "Individuals with narrow overall digital skills (three out of five component indicators are at basic or above basic level)",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_N|PC_IND_IU3": {
-          "indic_is": "I_DSK2_N",
-          "indic_is_label": "Individuals with narrow overall digital skills (three out of five component indicators are at basic or above basic level)",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_PS_AB|PC_IND": {
-          "indic_is": "I_DSK2_PS_AB",
-          "indic_is_label": "Individuals with above basic problem solving skills",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_PS_AB|PC_IND_IU3": {
-          "indic_is": "I_DSK2_PS_AB",
-          "indic_is_label": "Individuals with above basic problem solving skills",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_PS_BAB|PC_IND": {
-          "indic_is": "I_DSK2_PS_BAB",
-          "indic_is_label": "Individuals with basic or above basic problem solving skills",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_PS_BAB|PC_IND_IU3": {
-          "indic_is": "I_DSK2_PS_BAB",
-          "indic_is_label": "Individuals with basic or above basic problem solving skills",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_PS_B|PC_IND": {
-          "indic_is": "I_DSK2_PS_B",
-          "indic_is_label": "Individuals with basic problem solving skills",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_PS_B|PC_IND_IU3": {
-          "indic_is": "I_DSK2_PS_B",
-          "indic_is_label": "Individuals with basic problem solving skills",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_SF_AB|PC_IND": {
-          "indic_is": "I_DSK2_SF_AB",
-          "indic_is_label": "Individuals with above basic safety skills",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_SF_AB|PC_IND_IU3": {
-          "indic_is": "I_DSK2_SF_AB",
-          "indic_is_label": "Individuals with above basic safety skills",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_SF_BAB|PC_IND": {
-          "indic_is": "I_DSK2_SF_BAB",
-          "indic_is_label": "Individuals with basic or above basic safety skills",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_SF_BAB|PC_IND_IU3": {
-          "indic_is": "I_DSK2_SF_BAB",
-          "indic_is_label": "Individuals with basic or above basic safety skills",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_SF_B|PC_IND": {
-          "indic_is": "I_DSK2_SF_B",
-          "indic_is_label": "Individuals with basic safety skills",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_SF_B|PC_IND_IU3": {
-          "indic_is": "I_DSK2_SF_B",
-          "indic_is_label": "Individuals with basic safety skills",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_DSK2_X|PC_IND": {
-          "indic_is": "I_DSK2_X",
-          "indic_is_label": "Individuals with no overall digital skills",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_DSK2_X|PC_IND_IU3": {
-          "indic_is": "I_DSK2_X",
-          "indic_is_label": "Individuals with no overall digital skills",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_IUAIFE|PC_IND": {
-          "indic_is": "I_IUAIFE",
-          "indic_is_label": "Use of generative AI tools: for formal education",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_IUAIFE|PC_IND_IU3": {
-          "indic_is": "I_IUAIFE",
-          "indic_is_label": "Use of generative AI tools: for formal education",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_IUAIFE|PC_IND_IUAI": {
-          "indic_is": "I_IUAIFE",
-          "indic_is_label": "Use of generative AI tools: for formal education",
-          "unit": "PC_IND_IUAI",
-          "unit_label": "Percentage of individuals who have used any generative AI tools in the last 3 months"
-        },
-        "I_IUAIPR|PC_IND": {
-          "indic_is": "I_IUAIPR",
-          "indic_is_label": "Use of generative AI tools: for private purposes",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_IUAIPR|PC_IND_IU3": {
-          "indic_is": "I_IUAIPR",
-          "indic_is_label": "Use of generative AI tools: for private purposes",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_IUAIPR|PC_IND_IUAI": {
-          "indic_is": "I_IUAIPR",
-          "indic_is_label": "Use of generative AI tools: for private purposes",
-          "unit": "PC_IND_IUAI",
-          "unit_label": "Percentage of individuals who have used any generative AI tools in the last 3 months"
-        },
-        "I_IUAIWP|PC_IND": {
-          "indic_is": "I_IUAIWP",
-          "indic_is_label": "Use of generative AI tools: for professional (work) purposes",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_IUAIWP|PC_IND_IU3": {
-          "indic_is": "I_IUAIWP",
-          "indic_is_label": "Use of generative AI tools: for professional (work) purposes",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
-        },
-        "I_IUAIWP|PC_IND_IUAI": {
-          "indic_is": "I_IUAIWP",
-          "indic_is_label": "Use of generative AI tools: for professional (work) purposes",
-          "unit": "PC_IND_IUAI",
-          "unit_label": "Percentage of individuals who have used any generative AI tools in the last 3 months"
-        },
-        "I_IUAI|PC_IND": {
-          "indic_is": "I_IUAI",
-          "indic_is_label": "Use of generative AI tools: in the last 3 months",
-          "unit": "PC_IND",
-          "unit_label": "Percentage of individuals"
-        },
-        "I_IUAI|PC_IND_IU3": {
-          "indic_is": "I_IUAI",
-          "indic_is_label": "Use of generative AI tools: in the last 3 months",
-          "unit": "PC_IND_IU3",
-          "unit_label": "Percentage of individuals who used internet in the last 3 months"
+        "PC_IND_IUAI": {
+          "label": "Percentage of individuals who have used any generative AI tools in the last 3 months",
+          "base": "individuals_who_used_generative_ai",
+          "weightable": false
         }
       }
     },
@@ -507,7 +214,7 @@
       "min": 0.0,
       "max": 100.0,
       "mean": 42.2438,
-      "note": "Unit varies by indicator - read it from indicator.codes[...].unit_label rather than assuming a percentage."
+      "note": "Always a percentage (0-100), but of a base population that varies by unit. Read unit.codes[...].base before comparing two values, and see the mixed_denominators caveat: identical-looking numbers can have different meanings."
     },
     "sex": {
       "label": "Sex",
@@ -726,6 +433,7 @@
   },
   "caveats": [
     "Rows are overlapping subsets, not a partition: the same person is counted under IND_TOTAL, an age band, a sex band and an education band. Filter these rows, never sum them.",
+    "Every value is a percentage, but of 18 different base populations (see each unit's `base`). PC_ENT is a share of all enterprises; PC_ENT_AI_EC is a share only of those that considered AI. Both render as 0-100 and look comparable. Only compare or chart values that share the same base.",
     "There is no population-count column. Unlike the firm-level table, these percentages cannot be converted into absolute numbers of people - no equivalent of the sbs_sc_ovw universe is wired up.",
     "The unit of observation is a person, not a business. Never join or concatenate these rows with firm_level: comparing them is the point, merging them is a category error."
   ]

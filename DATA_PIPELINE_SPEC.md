@@ -95,7 +95,7 @@ Dimension names:
 ## Join logic
 
 1. Fetch and tidy `sbs_sc_ovw` first — this is the universe/denominator table. Every enterprise count (`enterprise_count`) that a percentage-based indicator gets validated against comes from here.
-2. Fetch and tidy each firm-level indicator dataset (`isoc_eb_ai`, `isoc_eb_das`, `isoc_e_dii`, `isoc_eb_ain2`) into the same long shape: `geo, time, size_emp (nullable), nace_r2 (nullable), indicator, value, dataset`.
+2. Fetch and tidy each firm-level indicator dataset (`isoc_eb_ai`, `isoc_eb_das`, `isoc_e_dii`, `isoc_eb_ain2`) into the same long shape: `geo, time, size_emp (nullable), nace_r2 (nullable), indicator, unit, value, dataset`.
 3. Normalize `size_emp` labels before joining (see caveat below), then left-join each indicator dataset onto the `sbs_sc_ovw` universe:
    - Size-class datasets join on (`geo`, `time`, `size_emp`).
    - Sector datasets join on (`geo`, `time`, `nace_r2`), against `sbs_sc_ovw` aggregated to "all sizes" per sector.
@@ -170,11 +170,11 @@ These are data-availability boundaries, not pipeline defects. A rate *dropping* 
 
 ### The datamap
 
-The Parquet files store short codes (`IT`, `SMALL_10_49`, `E_AI_TTM|PC_ENT`) because that is what joins are built on — but a code alone tells a reader nothing. Each `{table}.datamap.json` is the companion document that restores the meaning, built by [datamap.py](sme_pipeline/datamap.py). One datamap per table, rather than one combined file, so each describes only its own data — its own source datasets, and only the caveats that actually apply to it.
+The Parquet files store short codes (`IT`, `SMALL_10_49`, `E_AI_TTM`, `PC_ENT`) because that is what joins are built on — but a code alone tells a reader nothing. Each `{table}.datamap.json` is the companion document that restores the meaning, built by [datamap.py](sme_pipeline/datamap.py). One datamap per table, rather than one combined file, so each describes only its own data — its own source datasets, and only the caveats that actually apply to it.
 
 - **Per table** — source file, unit of observation, grain, row count, verified primary key.
 - **Per column** — label, role (`dimension` / `measure`), dtype, nullability, null count, distinct count, and for measures the min / max / mean.
-- **Per value** — the full code → label vocabulary, taken from Eurostat's own `dimension.category.label` and limited to codes actually present in the data. The composite `indicator` code is decomposed back into its `indic_is` and `unit` parts, each with its label.
+- **Per value** — the full code → label vocabulary, taken from Eurostat's own `dimension.category.label` and limited to codes actually present in the data. `unit` is the exception: each of its codes carries a `base` (which population the percentage is a share of) and `weightable` (whether `enterprise_count` is its denominator) alongside the label, since that is where the meaning of a value actually lives.
 - **Caveats** — the constraints below, carried inside the data product itself rather than living only in this file.
 
 Two facts drove this design:
@@ -206,7 +206,7 @@ Keeping them apart is what makes the **readiness-gap** narrative possible — co
 
 ### Firm-level table
 
-One row per (`geo`, `time`, `size_emp`, `nace_r2`, `indicator`) observation.
+One row per (`geo`, `time`, `size_emp`, `nace_r2`, `indicator`, `unit`) observation. `indicator` and `unit` are kept as separate columns, not joined into one composite code: they are two independent facts about the row — *what* is measured and *of which population* — and most queries filter on only one of them.
 
 | Column | Description |
 |---|---|
@@ -214,20 +214,22 @@ One row per (`geo`, `time`, `size_emp`, `nace_r2`, `indicator`) observation.
 | `time` | Year |
 | `size_emp` | Normalized enterprise size class (e.g. `SME_10_49`, `SME_50_249`, `LARGE_250PLUS`, `ALL`); null for sector-sourced rows |
 | `nace_r2` | Sector code; null unless the row comes from a sector-level dataset |
-| `indicator` | What's measured (e.g. `uses_ai`, `digital_intensity_level`, `uses_big_data_analytics`, `reason_no_ai_lack_expertise`, `enterprise_count`) |
+| `indicator` | What's measured — the Eurostat `indic_is` code (e.g. `E_AI_TANY`, `E_AI_TTM`, `E_DI_HI`). 291 distinct codes; not unique on its own |
+| `unit` | The base population the percentage is a share of (e.g. `PC_ENT` = all enterprises, `PC_ENT_AI_EC` = only those that considered AI). 18 distinct codes; 810 valid `indicator` × `unit` pairs |
 | `value` | The number itself (percentage in most cases) |
 | `enterprise_count` | Total enterprises in this geo/time/size_emp(/nace_r2) universe, from `sbs_sc_ovw` — the denominator the percentage was calculated against |
 | `dataset` | Eurostat source table code, for traceability |
 
 ### Individual-level table
 
-One row per (`geo`, `time`, `indicator`, demographic breakdown) observation. Kept separate from the firm-level table.
+One row per (`geo`, `time`, `indicator`, `unit`, demographic breakdown) observation. Kept separate from the firm-level table.
 
 | Column | Description |
 |---|---|
 | `geo` | Country code |
 | `time` | Year |
-| `indicator` | What's measured (e.g. `used_generative_ai`) |
+| `indicator` | What's measured (e.g. `I_IUAIWP`, `I_DSK2_AB`) |
+| `unit` | The base population (`PC_IND`, `PC_IND_IU3`, `PC_IND_IUAI`) |
 | `value` | The number itself |
 | `sex` | Demographic breakdown, where relevant |
 | `age` | Age class, where relevant |

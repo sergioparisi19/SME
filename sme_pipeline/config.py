@@ -171,11 +171,13 @@ FIRM_KEY = ["geo", "time", "size_emp", "nace_r2", "indic_is", "unit"]
 INDIVIDUAL_KEY = ["geo", "time", "indic_is", "unit", "ind_type"]
 UNIVERSE_KEY = ["geo", "time", "size_emp", "nace_r2"]
 
-# Keys of the *output* tables. These differ from the source keys above because
-# indic_is and unit are combined into a single `indicator` column, and rows from
-# several source tables are stacked together (hence `dataset`).
-FIRM_TABLE_KEY = ["geo", "time", "size_emp", "nace_r2", "indicator", "dataset"]
-INDIVIDUAL_TABLE_KEY = ["geo", "time", "indicator", "ind_type", "dataset"]
+# Keys of the *output* tables. These differ from the source keys above only in
+# that indic_is/indic_sbs is renamed to `indicator`, and rows from several
+# source tables are stacked together (hence `dataset`). `unit` stays a column of
+# its own on both sides - it identifies the metric just as much as the indicator
+# code does.
+FIRM_TABLE_KEY = ["geo", "time", "size_emp", "nace_r2", "indicator", "unit", "dataset"]
+INDIVIDUAL_TABLE_KEY = ["geo", "time", "indicator", "unit", "ind_type", "dataset"]
 
 
 # --- NACE totals ------------------------------------------------------------
