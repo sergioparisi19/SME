@@ -54,6 +54,24 @@ BARRIERS = [
     "E_AI_BCDP", "E_AI_BINC", "E_AI_BNU",
 ]
 
+# Eurostat's own labels are full sentences ("Enterprises do not use AI
+# technologies, because ..."), unusable as a column value or a chart label.
+SHORT_LABELS = {
+    "E_AI_BCST": "Cost too high",
+    "E_AI_BLE": "Lack of expertise",
+    "E_AI_BDDT": "Data availability or quality",
+    "E_AI_BLEG": "Legal consequences unclear",
+    "E_AI_BCDP": "Privacy and data protection",
+    "E_AI_BINC": "Incompatible with existing systems",
+    "E_AI_BNU": "AI not useful for us",
+}
+
+TIER_LABELS = {
+    "SMALL_10_49": "Small (10-49)",
+    "MEDIUM_50_249": "Medium (50-249)",
+    "LARGE_GE250": "Large (250+)",
+}
+
 # A tier is published only if its leading barrier leads in at least this share
 # of bootstrap draws. Measured: small 1.00, medium 0.93, large 0.47 - so large
 # is withheld, its top place being a three-way tie.
@@ -177,6 +195,78 @@ def _bootstrap(panel: pd.DataFrame, draws: int, seed: int) -> dict:
             for c, v in shares.items() if v
         },
     }
+
+
+def _fit(panel: pd.DataFrame) -> tuple[dict[str, float], np.ndarray, np.ndarray]:
+    """Full model in one go - coefficients, fitted values and year effects.
+
+    The Shapley step works on residualised arrays because it refits 128 times;
+    this is fitted once, directly, because the decomposition needs the
+    coefficients themselves rather than a variance split.
+    """
+    dummies = pd.get_dummies(panel["time"], drop_first=True).astype(float).to_numpy()
+    x = panel[BARRIERS].to_numpy(dtype=float)
+    design = np.column_stack([np.ones(len(panel)), dummies, x])
+    y = panel["y"].to_numpy(dtype=float)
+    beta, *_ = np.linalg.lstsq(design, y, rcond=None)
+    fitted = design @ beta
+    # The non-barrier part: intercept plus this row's year effect.
+    context = np.column_stack([np.ones(len(panel)), dummies]) @ beta[: 1 + dummies.shape[1]]
+    return dict(zip(BARRIERS, beta[-len(BARRIERS):])), fitted, context
+
+
+def by_country(df: pd.DataFrame) -> pd.DataFrame:
+    """Split each country's adoption gap into per-barrier contributions.
+
+    This is NOT a model per country. A country has four observations - 2021,
+    2023, 2024, 2025 - against seven predictors, so a country-level model is not
+    estimable and never will be with this data. What is estimable is the tier
+    model applied to a country: the gap between a country's actual adoption and
+    what the model expects of a country with average barrier levels that year,
+    split into the part each barrier accounts for.
+
+        expected_i    = intercept + year effect + (mean barriers) . beta
+        contribution  = beta_j * (country's barrier_j - the tier mean)
+        actual_i      = expected_i + sum(contributions) + residual_i
+
+    The residual is what the barriers do not explain, and it is reported rather
+    than hidden so the contributions cannot be mistaken for the whole story.
+    """
+    frames = []
+    for tier in TIERS:
+        panel = _panel(df, tier)
+        if len(panel) < 40:
+            continue
+        beta, fitted, context = _fit(panel)
+        means = panel[BARRIERS].mean()
+        # What the model expects of an average-barrier country in that year.
+        expected = context + float((means * pd.Series(beta)).sum())
+        actual = panel["y"].to_numpy(dtype=float)
+        residual = actual - fitted
+
+        for j, code in enumerate(BARRIERS):
+            deviation = panel[code].to_numpy(dtype=float) - means[code]
+            frames.append(pd.DataFrame({
+                "tier": TIER_LABELS.get(tier, tier),
+                "tier_code": tier,
+                "geo": panel["geo"].to_numpy(),
+                "year": panel["time"].to_numpy(),
+                "barrier": [SHORT_LABELS.get(code, code)] * len(panel),
+                "barrier_code": code,
+                "exposure_pct": panel[code].to_numpy(dtype=float).round(1),
+                "tier_mean_pct": round(float(means[code]), 1),
+                "deviation_pp": (deviation).round(1),
+                "coefficient": round(float(beta[code]), 4),
+                "contribution_pp": (beta[code] * deviation).round(2),
+                "actual_adoption_pct": actual.round(1),
+                "expected_adoption_pct": expected.round(1),
+                "gap_pp": (actual - expected).round(1),
+                "unexplained_pp": residual.round(2),
+            }))
+    if not frames:
+        return pd.DataFrame()
+    out = pd.concat(frames, ignore_index=True)
+    return out.sort_values(["tier_code", "geo", "year", "barrier_code"]).reset_index(drop=True)
 
 
 def analyse(df: pd.DataFrame, draws: int = BOOTSTRAP_DRAWS, seed: int = SEED) -> dict:

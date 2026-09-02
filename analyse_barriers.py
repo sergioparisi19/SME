@@ -7,9 +7,21 @@ higher - is easy to misread as a recommendation. It lives here, as a CSV to read
 and argue with, rather than on a page where a quadrant chart would settle the
 argument for the reader.
 
-    python analyse_barriers.py                    # writes data/analysis/barrier_importance.csv
-    python analyse_barriers.py --draws 1000       # tighter bootstrap intervals, slower
-    python analyse_barriers.py --out results.csv
+    python analyse_barriers.py               # writes both CSVs to data/analysis/
+    python analyse_barriers.py --draws 1000  # tighter bootstrap intervals, slower
+    python analyse_barriers.py --out-dir somewhere/
+
+Two files come out.
+
+`barrier_importance.csv` - one row per size tier and barrier: which barriers
+separate high-adoption countries from low-adoption ones, and how firmly.
+
+`barrier_contributions_by_country.csv` - the same model read country by country:
+each country's actual adoption, what the model expects of a country with average
+barrier levels that year, and how much of the difference each barrier accounts
+for. This is not a model per country - four observations against seven
+predictors is not estimable - and the unexplained remainder is reported so the
+contributions cannot be mistaken for the whole gap.
 
 Columns, one row per size tier and barrier, ranked within tier:
 
@@ -44,17 +56,13 @@ from sme_pipeline.config import PROCESSED_DIR, PROJECT_ROOT
 DEFAULT_OUT = PROJECT_ROOT / "data" / "analysis" / "barrier_importance.csv"
 
 FIELDS = [
-    "tier", "rank", "barrier", "barrier_code", "share_pct",
+    "tier", "rank", "barrier", "barrier_full", "barrier_code", "share_pct",
     "ci_low_pct", "ci_high_pct", "first_place_rate",
     "direction", "corr_with_adoption", "exposure_eu27_pct",
     "n_cells", "n_countries", "years", "delta_r2", "lead_share", "tier_published",
 ]
 
-TIER_NAMES = {
-    "SMALL_10_49": "Small (10-49)",
-    "MEDIUM_50_249": "Medium (50-249)",
-    "LARGE_GE250": "Large (250+)",
-}
+TIER_NAMES = barrier_analysis.TIER_LABELS
 
 
 def rows_from(result: dict, labels: dict[str, str]) -> list[dict]:
@@ -66,7 +74,8 @@ def rows_from(result: dict, labels: dict[str, str]) -> list[dict]:
             out.append({
                 "tier": TIER_NAMES.get(tier, tier),
                 "rank": rank,
-                "barrier": labels.get(code, code),
+                "barrier": barrier_analysis.SHORT_LABELS.get(code, code),
+                "barrier_full": labels.get(code, code),
                 "barrier_code": code,
                 "share_pct": b["share"],
                 "ci_low_pct": interval[0],
@@ -89,7 +98,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--draws", type=int, default=barrier_analysis.BOOTSTRAP_DRAWS)
     parser.add_argument("--seed", type=int, default=barrier_analysis.SEED)
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT.parent)
     args = parser.parse_args()
 
     firm = pd.read_parquet(PROCESSED_DIR / "firm_level.parquet")
@@ -101,13 +110,32 @@ def main() -> None:
     result = barrier_analysis.analyse(firm, draws=args.draws, seed=args.seed)
     rows = rows_from(result, names)
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    with args.out.open("w", newline="", encoding="utf-8") as fh:
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = args.out_dir / "barrier_importance.csv"
+    country_path = args.out_dir / "barrier_contributions_by_country.csv"
+
+    # Windows locks a CSV that is open in Excel or an editor, and losing a
+    # 9-second run to a file handle is a poor trade - say which file, and why.
+    for path in (summary_path, country_path):
+        try:
+            path.open("a").close()
+        except PermissionError:
+            raise SystemExit(
+                f"Cannot write {path.name} - it is open in another program. "
+                "Close it and run again."
+            )
+
+    with summary_path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=FIELDS)
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"\nWrote {len(rows)} rows to {args.out}\n")
+    country = barrier_analysis.by_country(firm)
+    country.to_csv(country_path, index=False, encoding="utf-8")
+
+    print(f"\nWrote {len(rows)} rows to {summary_path}")
+    print(f"Wrote {len(country)} rows to {country_path} "
+          f"({country.geo.nunique()} countries)\n")
     for tier, model in result["tiers"].items():
         flag = "" if model["published"] else "   <- ranking NOT stable across draws"
         lead = max(model["barriers"].items(), key=lambda kv: kv[1]["share"])
