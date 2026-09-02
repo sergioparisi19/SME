@@ -185,6 +185,13 @@ const sel = () => state[state.view];
 const GEO_BADGE = { EU27_2020: "EU", EL: "GR" };
 const geoBadge = (code) => GEO_BADGE[code] ?? code;
 
+/* The project's home country. It stays the default selection, and leads the
+ * badge row whenever it is part of a group, so a reader scanning a large
+ * selection still sees Italy first. */
+const HOME_GEO = "IT";
+const homeFirst = (geos) =>
+  [...geos].sort((a, b) => (b === HOME_GEO) - (a === HOME_GEO));
+
 /**
  * The one or two slices every chart draws.
  *
@@ -1195,7 +1202,7 @@ const VIEWS = {
  * A searchable single-select. A native <select> over 34 countries cannot show
  * the colour a country carries in the charts, and cannot be typed into.
  */
-function countryPicker(host, { options, selected, onToggle, hint }) {
+function countryPicker(host, { options, selected, onToggle, onSelectAll, hint }) {
   host.innerHTML = "";
   const button = el("button", {
     class: "dd-button", type: "button", id: "dd-geo-button",
@@ -1220,7 +1227,7 @@ function countryPicker(host, { options, selected, onToggle, hint }) {
   host.appendChild(panel);
 
   function paintButton() {
-    const picked = selected();
+    const picked = homeFirst(selected());
     // Three badges is what fits the button; past that the count carries it.
     badges.innerHTML = "";
     picked.slice(0, 3).forEach((code) => badges.appendChild(
@@ -1237,6 +1244,26 @@ function countryPicker(host, { options, selected, onToggle, hint }) {
     const q = search.value.trim().toLowerCase();
     const picked = selected();
     list.innerHTML = "";
+
+    // "All countries" leads the list, but only when nothing is being searched -
+    // offering it beside three filtered results would not mean what it says.
+    if (!q) {
+      const every = options().every((c) => picked.includes(c));
+      const all = el("button", {
+        class: "dd-option dd-all", type: "button", role: "option",
+        "aria-selected": String(every),
+      });
+      all.appendChild(el("span", { class: "geo-badge", text: "ALL" }));
+      all.appendChild(el("span", { text: every ? `All ${options().length} countries` : "Select all countries" }));
+      if (every) all.appendChild(el("span", { class: "dd-check", text: "✓" }));
+      all.addEventListener("click", () => {
+        onSelectAll(every);
+        paintButton();
+        paintList();
+      });
+      list.appendChild(all);
+    }
+
     options()
       .filter((code) => !q || label("geo", code).toLowerCase().includes(q)
         || geoBadge(code).toLowerCase().startsWith(q))
@@ -1275,7 +1302,12 @@ function countryPicker(host, { options, selected, onToggle, hint }) {
 
   paintButton();
   paintList();
-  return { paint: () => { paintButton(); paintList(); } };
+  return {
+    paint: () => { paintButton(); paintList(); },
+    // The options actually on offer, which already exclude the other side's
+    // picks - selecting "all" must never claim a country the other side holds.
+    currentOptions: () => options(),
+  };
 }
 
 /* --- rendering ---------------------------------------------------------- */
@@ -1396,6 +1428,13 @@ function buildControls() {
     selected: () => state.geos,
     hint: "Pick more to see their combined average.",
     onToggle: (code) => toggleIn(state.geos, code),
+    // Selecting everything then unselecting it has to land somewhere, and a
+    // selection of none would leave the charts with nothing to draw; it falls
+    // back to the home country rather than to an empty page.
+    onSelectAll: (isAll) => {
+      state.geos = isAll ? [HOME_GEO] : geoPicker.currentOptions();
+      commit();
+    },
   });
 
   comparePicker = countryPicker(document.getElementById("dd-compare"), {
@@ -1403,6 +1442,13 @@ function buildControls() {
     selected: () => sel().compareGeos,
     hint: "Pick more to compare against their combined average.",
     onToggle: (code) => toggleIn(sel().compareGeos, code),
+    onSelectAll: (isAll) => {
+      const opts = comparePicker.currentOptions();
+      // Unselecting all lands on the default comparison where it is still on
+      // offer, rather than on whatever happens to sort first.
+      sel().compareGeos = isAll ? [opts.includes("DE") ? "DE" : opts[0]] : opts;
+      commit();
+    },
   });
 
   document.getElementById("primary-select").addEventListener("change", (e) => {

@@ -244,6 +244,9 @@ nav.analyses a[aria-current="true"] {
   font: inherit; font-size: 13.5px; color: var(--ink-2); cursor: pointer; text-align: left;
 }
 .dd-option:hover { background: var(--sunken); color: var(--ink); }
+.dd-all { border-bottom: 1px solid var(--border); border-radius: 8px 8px 0 0; margin-bottom: 4px; }
+.dd-all .geo-badge { background: var(--ink-2); letter-spacing: 0.06em; }
+.dd-all[aria-selected="true"] .geo-badge { background: var(--series-1); }
 .dd-option[aria-selected="true"] { color: var(--ink); font-weight: 600; background: var(--sunken); }
 .dd-check { margin-left: auto; color: var(--series-1); font-weight: 700; }
 
