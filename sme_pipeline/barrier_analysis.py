@@ -288,7 +288,7 @@ def _aggregate_targets(df: pd.DataFrame, tier: str, panel: pd.DataFrame) -> pd.D
 
 
 def by_country(df: pd.DataFrame, labels: dict[str, str] | None = None,
-               years: list[str] | None = None) -> pd.DataFrame:
+               years: list[str] | None = None, latest_only: bool = True) -> pd.DataFrame:
     """Split each country's adoption gap into per-barrier contributions.
 
     This is NOT a model per country. A country has four observations - 2021,
@@ -310,6 +310,13 @@ def by_country(df: pd.DataFrame, labels: dict[str, str] | None = None,
 
     The residual is what the barriers do not explain, and it is reported rather
     than hidden so the contributions cannot be mistaken for the whole story.
+
+    Fitting and reporting are separated on purpose. The model uses every year it
+    is given, because that is where the coefficients come from and the barrier
+    slopes need all the variation there is. The output defaults to the latest
+    year alone: a country's position three years ago is history, and carrying
+    four years of it quadruples the file for rows nobody reads. Pass
+    `latest_only=False` for the lot.
     """
     names = geo_labels() if labels is None else labels
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -329,10 +336,20 @@ def by_country(df: pd.DataFrame, labels: dict[str, str] | None = None,
         extra = _aggregate_targets(df, tier, panel)
         targets = [(panel, True)] + ([(extra, False)] if len(extra) else [])
 
+        # Fitted on every year above; reported on the most recent one here. The
+        # newest year is taken per tier rather than globally - nothing guarantees
+        # every tier ends on the same survey wave.
+        if latest_only:
+            newest = panel["time"].max()
+            targets = [(block[block["time"] == newest], flag) for block, flag in targets]
+            targets = [(block, flag) for block, flag in targets if len(block)]
+
         for block, in_model in targets:
             x = block[BARRIERS].to_numpy(dtype=float)
-            ctx = (context if in_model
-                   else block["time"].map(context_by_year).to_numpy(dtype=float))
+            # Always mapped by year rather than reused from the fit: the block
+            # may have been filtered to one year, and the context is constant
+            # within a year anyway, so the two agree by construction.
+            ctx = block["time"].map(context_by_year).to_numpy(dtype=float)
             actual = block["y"].to_numpy(dtype=float)
             # What the model expects of an average-barrier unit in that year.
             expected = ctx + offset

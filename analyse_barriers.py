@@ -8,7 +8,8 @@ and argue with, rather than on a page where a quadrant chart would settle the
 argument for the reader.
 
     python analyse_barriers.py               # writes both CSVs to data/analysis/
-    python analyse_barriers.py --years 2025  # one survey year only
+    python analyse_barriers.py --years 2025  # fit on one survey year only
+    python analyse_barriers.py --every-year  # by-country file keeps all years
     python analyse_barriers.py --draws 1000  # tighter bootstrap intervals, slower
     python analyse_barriers.py --out-dir somewhere/
 
@@ -26,6 +27,11 @@ barrier levels that year, and how much of the difference each barrier accounts
 for. This is not a model per country - four observations against seven
 predictors is not estimable - and the unexplained remainder is reported so the
 contributions cannot be mistaken for the whole gap.
+
+Fitting and reporting are separate. The model always uses every year it is given,
+because that is where the coefficients come from; the file reports the latest
+year only, since a country's position three years ago is history. `--every-year`
+emits the lot.
 
 Columns, one row per size tier and barrier, ranked within tier:
 
@@ -133,7 +139,9 @@ def main() -> None:
     parser.add_argument("--draws", type=int, default=barrier_analysis.BOOTSTRAP_DRAWS)
     parser.add_argument("--seed", type=int, default=barrier_analysis.SEED)
     parser.add_argument("--years", nargs="+", default=None,
-                        help="restrict to these survey years, e.g. --years 2025")
+                        help="restrict the MODEL to these survey years, e.g. --years 2025")
+    parser.add_argument("--every-year", action="store_true",
+                        help="emit every year in the by-country file, not just the latest")
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT.parent)
     args = parser.parse_args()
 
@@ -173,7 +181,10 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(rows)
 
-    country = enrich_country(barrier_analysis.by_country(firm, years=args.years), result)
+    country = enrich_country(
+        barrier_analysis.by_country(firm, years=args.years,
+                                    latest_only=not args.every_year),
+        result)
     country.to_csv(country_path, index=False, encoding="utf-8")
 
     print(f"\nWrote {len(rows)} rows to {summary_path}")
