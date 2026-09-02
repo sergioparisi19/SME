@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Design &amp; method — SME Digital &amp; AI Readiness</title>
+<meta name="description" content="Architecture decisions, methodological rules and design system behind the SME Digital & AI Readiness portal.">
+<link rel="stylesheet" href="doc.css">
+</head>
+<body>
+
+<div class="top">
+  <div class="wrap">
+    <p class="eyebrow">Documentation · Level 2 of 3</p>
+    <h1>Design &amp; method</h1>
+    <p class="lede">
+      The architecture, the statistical rules the page enforces, and the reasoning
+      behind the choices that were not obvious.
+    </p>
+    <nav class="docnav">
+      <a href="index.html">1 · Value</a>
+      <a href="design.html" aria-current="page">2 · Design &amp; method</a>
+      <a href="code.html">3 · Code</a>
+      <span class="spacer"></span>
+      <a href="../" class="live">Open the portal ↗</a>
+    </nav>
+  </div>
+</div>
+
+<main class="wrap">
+
+<h2>Architecture</h2>
+
+<p class="intro">
+  The whole system is a build-time pipeline and a static page. Nothing executes on a
+  server when someone visits.
+</p>
+
+<pre><code>Eurostat API
+    │  extract → parse → normalize → transform → load
+    ▼
+data/processed/*.parquet  +  *.datamap.json      canonical, versioned
+    │  sme_pipeline/export.py   (curated, per-chart)
+    ▼
+docs/data/{series,labels,meta}.json              ~300 KB gzipped
+    │  fetch() at page load
+    ▼
+docs/index.html + app.js + style.css             GitHub Pages</code></pre>
+
+<h3>Why not a database</h3>
+<p>
+  The canonical tables are 3.1 MB and 1.1 MB of Parquet. A database would add a
+  service to run, a schema to migrate and credentials to manage, and buy nothing:
+  the analytical work happens at build time in pandas, and the page needs a fixed,
+  curated slice rather than arbitrary queries.
+</p>
+
+<h3>Why a static page and not Streamlit</h3>
+<p>
+  Streamlit's advantage is running Python per interaction. Nothing here needs that —
+  filtering a few thousand rows is client-side work. A static page loads instantly
+  from a shared link, survives being screenshotted, is indexable, and has no process
+  that can be asleep when someone clicks. The distribution mechanism is a link on
+  social media; that argues for static more than any technical consideration.
+</p>
+
+<h3>Why the export exists</h3>
+<p>
+  The Parquet tables carry 291 firm indicators across 18 different unit bases, most
+  of which must never be charted beside each other. Shipping them whole would be both
+  large and dangerous. The export publishes a curated subset — currently
+  <strong>13 charts, 50 indicators, 43,721 rows</strong> — with each chart pinned to
+  exactly one unit.
+</p>
+
+<h2>The rules the page enforces</h2>
+
+<p>
+  These are not stylistic preferences. Each one prevents a specific, plausible error
+  that would produce a chart that looks right and is wrong.
+</p>
+
+<div class="rule">
+  <h4>One unit per chart, and the base is always stated</h4>
+  <p>
+    Every value in the source is a percentage, but of eighteen different populations.
+    <code>PC_ENT</code> is a share of all enterprises; <code>PC_ENT_AI_EC</code> is a
+    share only of those that considered AI. Each chart declares a single unit at
+    build time, and the export refuses to emit a chart without one.
+  </p>
+</div>
+
+<div class="rule">
+  <h4>Barriers use the base the question was actually asked of</h4>
+  <p>
+    Read as a share of <em>all</em> enterprises, "we lack expertise" is 5% and the
+    size bands invert — because most firms never considered AI and so answered
+    nothing. Read as a share of firms that <em>did</em> consider it, the same answer
+    is 59%. The second is the real figure; the first is an artefact of the denominator.
+    Because that base is not the enterprise population, those figures are never weighted.
+  </p>
+</div>
+
+<div class="rule">
+  <h4>EU27 is displayed, never recomputed</h4>
+  <p>
+    Eurostat's aggregate is weighted by enterprise counts. A plain mean of the member
+    states is a materially different number. The portal shows the published row.
+  </p>
+</div>
+
+<div class="rule">
+  <h4>Multi-country groups are weighted the way EU27 is</h4>
+  <p>
+    Selecting several countries combines them weighted by how many enterprises each
+    has. Checked against Eurostat: all 32 reporters, small firms, 2024, ICT
+    recruitment — weighted <strong>6.50%</strong> against Eurostat's published
+    <strong>6.23%</strong>, where a plain average gives <strong>7.31%</strong>. The
+    residual is the six non-EU reporters the EU27 aggregate excludes.
+  </p>
+</div>
+
+<div class="rule">
+  <h4>The weighting decision is made once per series, not per point</h4>
+  <p>
+    Enterprise counts exist only for 2021–2024. Deciding year by year would weight a
+    trend's 2024 point and not its 2025 one, putting a step in the line that comes
+    from the method rather than the data. If any year a series needs lacks counts,
+    the whole series falls back to a plain average — and the page says which happened.
+  </p>
+</div>
+
+<div class="rule">
+  <h4>Overlapping bands are flagged, not silently drawn</h4>
+  <p>
+    Size classes are not a partition: <code>SME_10_249</code> contains
+    <code>SMALL_10_49</code>, and <code>IND_TOTAL</code> contains every age band.
+    Comparing a group against one that contains it is a part against its whole, so
+    the page warns on the chart itself.
+  </p>
+</div>
+
+<div class="rule">
+  <h4>Absolute counts only when the years line up</h4>
+  <p>
+    The business register trails the survey by a year. Pairing a 2025 percentage with
+    a 2024 business count produces a figure belonging to neither year, so the section
+    removes itself entirely unless both come from the same year.
+  </p>
+</div>
+
+<div class="rule">
+  <h4>Withheld figures are marked, not dropped</h4>
+  <p>
+    Eurostat suppresses a cell when too few surveyed firms fall into it — the raw
+    response carries a <code>u</code> "low reliability" flag and no number. Dropping
+    the row would turn "too small to measure" into "apparently nothing". Rows stay,
+    labelled, with the reason on hover.
+  </p>
+</div>
+
+<div class="rule">
+  <h4>Rows are ordered by the EU27 figure, not the selection</h4>
+  <p>
+    Sorting on the selected country would reshuffle rows every time the reader
+    switches country, making two screenshots impossible to compare. The aggregate
+    keeps the running order fixed while the bars move.
+  </p>
+</div>
+
+<h2>Two things the data cannot do</h2>
+
+<table>
+  <thead><tr><th>Limit</th><th>Consequence</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>The ICT surveys sample only enterprises with 10+ employees</td>
+      <td>Micro-enterprises — most firms in Europe — are never measured. Stated in the methodology and in the footer of every page.</td>
+    </tr>
+    <tr>
+      <td>Sector is never crossed with size class</td>
+      <td>The Industry view cannot carry an SME cut. Its unit-of-observation banner says so and points at the Companies view.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>
+  The sector view also uses only the eleven single-letter NACE sections. The source
+  additionally carries aggregates (<code>C19-C23</code>), divisions (<code>J61</code>)
+  and bespoke groupings (<code>ICT</code>) that overlap one another — charting the
+  full 50-code list together would double-count.
+</p>
+
+<h2>The visual system</h2>
+
+<h3>Palette</h3>
+<p>
+  Four categorical colours, chosen by measurement rather than taste and validated
+  against colour-vision-deficiency simulation in both light and dark modes.
+</p>
+
+<table>
+  <thead><tr><th>Slot</th><th>Light</th><th>Dark</th><th>Role</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><code>#215699</code></td><td><code>#5b93da</code></td><td>Primary selection</td></tr>
+    <tr><td>2</td><td><code>#c02b2b</code></td><td><code>#e05c62</code></td><td>Comparison</td></tr>
+    <tr><td>3</td><td><code>#7c4dc7</code></td><td><code>#8f77e0</code></td><td>Third series</td></tr>
+    <tr><td>4</td><td><code>#00897b</code></td><td><code>#0ba98b</code></td><td>Fourth series</td></tr>
+  </tbody>
+</table>
+
+<p>
+  Worst adjacent CVD separation is ΔE <strong>15.9</strong> in light mode and
+  <strong>15.1</strong> in dark, against a target of 8 — roughly double. The slot
+  order is the safety mechanism, not decoration: <strong>green cannot occupy slot 2</strong>,
+  because measured next to the red it fails outright at ΔE 3.4 (the classic red/green
+  collapse). Teal is viable only with violet between it and the red, which is why the
+  order runs blue, red, violet, teal.
+</p>
+
+<h3>Encoding rules</h3>
+<ul>
+  <li><strong>Ordered categories get a single-hue ramp</strong> — age bands, education levels. The ramp carries the ordering.</li>
+  <li><strong>Nominal categories get one colour</strong> — sectors have no natural order, so the all-sectors chart is a single-colour ranking with the selection lifted. A value-ramp on unordered categories would double-encode bar length as hue.</li>
+  <li><strong>Colour follows the entity, never its rank</strong> — filtering never repaints the survivors.</li>
+  <li><strong>Every chart has a table view.</strong> Three light-mode slots sit below 3:1 contrast on the surface; a readable table is the required relief.</li>
+</ul>
+
+<h3>Motion</h3>
+<p>
+  Bars grow in over 300 ms with the stagger capped at 110 ms. Deliberately short:
+  the page is built to be screenshotted, and a long entrance means a capture taken a
+  moment early shows half-drawn bars — which it did, at the first attempt.
+</p>
+
+<h2>The narrative arc</h2>
+
+<p>
+  Sections declare which part of the argument they belong to and are sorted into a
+  fixed order rather than hand-arranged, so a part can never appear twice in the
+  navigation:
+</p>
+
+<pre><code>The scale  →  Where it sits  →  Why they don't  →  What is missing underneath  →  Reading it</code></pre>
+
+<p>
+  The sidebar groups by part instead of numbering a flat list, so the shape of the
+  argument is visible before scrolling. A section whose data does not exist for the
+  current selection removes itself rather than rendering an empty shell.
+</p>
+
+<footer>
+  <p>
+    Previous: <a href="index.html">what this is for</a> ·
+    Next: <a href="code.html">what the code does</a> ·
+    <a href="../">the portal itself</a>
+  </p>
+</footer>
+
+</main>
+</body>
+</html>

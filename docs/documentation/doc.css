@@ -1,0 +1,134 @@
+/* Documentation pages. Same validated palette as the portal (see the note at
+   the top of ../style.css); only the layout differs — prose column instead of
+   a rail-and-charts shell. */
+:root {
+  color-scheme: light;
+  --plane:     #eef1f4;
+  --surface:   #fdfcfb;
+  --sunken:    #e5e9ee;
+  --ink:       #16181d;
+  --ink-2:     #3d4450;
+  --ink-muted: #6b7280;
+  --grid:      #e2e6ea;
+  --axis:      #c8cfd6;
+  --border:    rgba(22, 24, 29, 0.11);
+  --shadow-1:  0 1px 2px rgba(20, 27, 37, 0.05), 0 4px 14px rgba(20, 27, 37, 0.06);
+  --rail:      #0a1c33;
+  --rail-raised: #12304f;
+  --rail-ink:  #e6edf6;
+  --rail-ink-2:#93aac6;
+  --accent:    #215699;
+  --accent-2:  #c02b2b;
+  --code-bg:   #f4f6f8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --plane: #0d1014; --surface: #15191f; --sunken: #10141a;
+    --ink: #ffffff; --ink-2: #c2c9d2; --ink-muted: #8b93a0;
+    --grid: #262c34; --axis: #333a44; --border: rgba(255,255,255,0.10);
+    --shadow-1: 0 1px 2px rgba(0,0,0,0.44), 0 4px 14px rgba(0,0,0,0.36);
+    --rail: #071523; --rail-raised: #0f2540;
+    --accent: #5b93da; --accent-2: #e05c62; --code-bg: #10151c;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0; background: var(--plane); color: var(--ink);
+  font: 16px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* --- Masthead ----------------------------------------------------------- */
+
+.top {
+  background: linear-gradient(180deg, var(--rail-raised), var(--rail));
+  color: var(--rail-ink); padding: 26px 0 0;
+}
+.wrap { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+.eyebrow {
+  font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--rail-ink-2); margin: 0 0 10px;
+}
+.top h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 0 0 10px; letter-spacing: -0.02em; }
+.top .lede { color: var(--rail-ink-2); margin: 0 0 22px; max-width: 62ch; font-size: 17px; }
+
+.docnav { display: flex; gap: 4px; flex-wrap: wrap; padding-bottom: 0; }
+.docnav a {
+  padding: 9px 14px; border-radius: 9px 9px 0 0; text-decoration: none;
+  color: var(--rail-ink-2); font-size: 13.5px; background: rgba(255,255,255,0.05);
+}
+.docnav a:hover { color: var(--rail-ink); }
+.docnav a[aria-current="page"] { background: var(--plane); color: var(--ink); font-weight: 600; }
+.docnav .spacer { flex: 1 1 auto; }
+.docnav a.live { background: none; color: var(--rail-ink-2); border-radius: 9px; }
+.docnav a.live:hover { background: rgba(255,255,255,0.08); color: var(--rail-ink); }
+
+/* --- Prose -------------------------------------------------------------- */
+
+main { padding: 40px 0 90px; }
+h2 {
+  font-size: 24px; letter-spacing: -0.015em; margin: 46px 0 12px;
+  padding-top: 22px; border-top: 1px solid var(--border);
+}
+h2:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+h3 { font-size: 17px; margin: 30px 0 8px; letter-spacing: -0.005em; }
+p { margin: 0 0 15px; color: var(--ink-2); }
+p.intro { font-size: 17.5px; color: var(--ink); }
+ul, ol { color: var(--ink-2); padding-left: 22px; margin: 0 0 15px; }
+li { margin-bottom: 7px; }
+a { color: var(--accent); }
+strong { color: var(--ink); }
+
+code {
+  font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+  font-size: 0.875em; background: var(--code-bg); padding: 1px 5px;
+  border-radius: 4px; border: 1px solid var(--border);
+}
+pre {
+  background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px 16px; overflow-x: auto; font-size: 13px; line-height: 1.55;
+  font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+  color: var(--ink-2);
+}
+pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+
+table {
+  width: 100%; border-collapse: collapse; margin: 4px 0 20px; font-size: 14.5px;
+  display: block; overflow-x: auto;
+}
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+th {
+  color: var(--ink-muted); font-size: 11.5px; text-transform: uppercase;
+  letter-spacing: 0.05em; font-weight: 600; white-space: nowrap;
+}
+td { color: var(--ink-2); }
+td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* --- Devices ------------------------------------------------------------ */
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 4px 0 24px; }
+.stat {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px 18px; box-shadow: var(--shadow-1);
+}
+.stat .n { font-size: 27px; letter-spacing: -0.02em; color: var(--accent); line-height: 1.1; }
+.stat .n.alt { color: var(--accent-2); }
+.stat .l { font-size: 12.5px; color: var(--ink-muted); margin-top: 5px; }
+
+.rule {
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent); border-radius: 12px;
+  padding: 15px 18px; margin: 0 0 16px; box-shadow: var(--shadow-1);
+}
+.rule h4 { margin: 0 0 6px; font-size: 15px; }
+.rule p { margin: 0; font-size: 14.5px; }
+.rule.warn { border-left-color: var(--accent-2); }
+
+footer {
+  border-top: 1px solid var(--border); margin-top: 50px; padding: 20px 0 0;
+  color: var(--ink-muted); font-size: 13px;
+}
