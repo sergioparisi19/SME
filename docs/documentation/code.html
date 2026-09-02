@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code reference — SME Digital &amp; AI Readiness</title>
+<meta name="description" content="Module-by-module reference for the SME Digital & AI Readiness pipeline, export and page.">
+<link rel="stylesheet" href="doc.css">
+</head>
+<body>
+
+<div class="top">
+  <div class="wrap">
+    <p class="eyebrow">Documentation · Level 3 of 3</p>
+    <h1>Code reference</h1>
+    <p class="lede">
+      What each module does, the shape of the data contract between them, and how to
+      run or extend the thing.
+    </p>
+    <nav class="docnav">
+      <a href="index.html">1 · Value</a>
+      <a href="design.html">2 · Design &amp; method</a>
+      <a href="code.html" aria-current="page">3 · Code</a>
+      <span class="spacer"></span>
+      <a href="../" class="live">Open the portal ↗</a>
+    </nav>
+  </div>
+</div>
+
+<main class="wrap">
+
+<h2>Repository layout</h2>
+
+<pre><code>fetch_data.py              CLI entry point for the data pipeline
+build_site.py              builds the page bundle, then serves it locally
+sme_pipeline/              the data layer, one module per stage
+    config.py              dataset registry, paths, canonical vocabularies
+    extract.py             stage 1 — fetch and cache raw JSON-stat
+    parse.py               stage 2 — JSON-stat → tidy DataFrame
+    normalize.py           stage 3 — raw codes → canonical vocabulary
+    transform.py           stage 4 — assemble tables, join the universe
+    load.py                stage 5 — write Parquet + datamap
+    datamap.py             build the data dictionary
+    pipeline.py            chain the stages
+    export.py              the presentation layer's data contract
+data/raw/                  cached API responses (git-ignored)
+data/processed/            *.parquet + *.datamap.json — canonical output
+docs/                      the published site (GitHub Pages root)
+    index.html  app.js  style.css
+    data/                  series.json, labels.json, meta.json
+    documentation/         these pages</code></pre>
+
+<h2>Running it</h2>
+
+<table>
+  <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td><code>python fetch_data.py</code></td><td>Runs the full pipeline at dev scope (IT, DE, EU27) and rewrites <code>data/processed/</code>.</td></tr>
+    <tr><td><code>python fetch_data.py --geo IT DE FR --refresh</code></td><td>Wider scope, ignoring the cache.</td></tr>
+    <tr><td><code>python fetch_data.py --no-write</code></td><td>Dry run.</td></tr>
+    <tr><td><code>python build_site.py</code></td><td>Regenerates <code>docs/data/*.json</code>, then serves the site locally and opens a browser.</td></tr>
+    <tr><td><code>python build_site.py --no-build</code></td><td>Serve only — what you want while editing HTML, CSS or JS.</td></tr>
+    <tr><td><code>python build_site.py --no-serve</code></td><td>Build only — what CI would run.</td></tr>
+  </tbody>
+</table>
+
+<p>
+  Serving matters: opening <code>index.html</code> from disk gives it a
+  <code>file://</code> origin, where <code>fetch()</code> is blocked and the page
+  stalls on "Loading data…". The dev server also sends <code>no-store</code>, so a
+  stale bundle can never be the reason something looks wrong.
+</p>
+
+<h2>The data pipeline</h2>
+
+<h3>config.py</h3>
+<p>
+  Declarative only — no I/O, no transformation. Holds the <code>DatasetSpec</code>
+  registry of seventeen Eurostat tables, the geography scope, canonical size-class
+  names, the two different "all sectors" NACE totals, and the verified uniqueness
+  keys for each table.
+</p>
+
+<h3>extract.py — fetch and cache</h3>
+<p>
+  Two behaviours worth knowing. The cache is <strong>keyed by request</strong>, so a
+  cached file is reused only when it was fetched with the same query — changing
+  <code>--geo</code> re-fetches rather than silently returning the previous scope.
+  And Eurostat caps response size: an HTTP 413 makes the fetch <strong>split its geo
+  list in half and retry recursively</strong>, rather than hard-coding a safe batch
+  size per dataset.
+</p>
+
+<h3>parse.py — JSON-stat → tidy rows</h3>
+<p>
+  Uses <code>pyjstat</code> to flatten each response to one row per observation, and
+  extracts the category label vocabulary that later becomes the datamap.
+  <code>check_key_unique()</code> asserts the declared key really is unique.
+</p>
+
+<h3>normalize.py — codes → canonical vocabulary</h3>
+<p>
+  Every function fails loudly on codes it does not recognise. Eurostat adds and
+  renames categories between waves, and a silent drop — or worse, a silent
+  mis-join — would corrupt the headline numbers with no visible symptom.
+  <code>decode_ind_type()</code> unpacks the individual-level dimension, which packs
+  sex, age, education, labour status and citizenship into one code.
+</p>
+
+<h3>transform.py — assemble and join</h3>
+<p>
+  Builds the enterprise-count universe (deriving bands like <code>SMALL_10_49</code>
+  by summing the finer bands Eurostat publishes — counts are additive, unlike
+  percentages), then assembles the firm and individual tables and joins firm rows to
+  the universe. <code>join_report()</code> reports the match rate per source, which
+  is how a regression in the join gets noticed.
+</p>
+
+<h3>load.py and datamap.py</h3>
+<p>
+  Parquet is the canonical artefact; the datamap is the companion dictionary that
+  makes short codes readable — per column: label, role, dtype, nullability, distinct
+  count; per value: the full code → label vocabulary; plus the caveats, carried
+  inside the data product rather than living only in a spec file.
+</p>
+
+<h2>export.py — the data contract</h2>
+
+<p>
+  Turns the canonical tables into the bundle the page fetches. Two rules are enforced
+  here rather than left to the page:
+</p>
+
+<ol>
+  <li>Every chart is pinned to exactly one <code>unit</code>.</li>
+  <li>Unknown indicator codes <strong>raise, naming the code</strong> — a silently dropped series becomes an empty chart nobody notices.</li>
+</ol>
+
+<p>Three further behaviours that are easy to miss:</p>
+<ul>
+  <li><code>enterprise_count</code> is <strong>dropped</strong> wherever the unit is not a share of all enterprises, so the page cannot compute a weighted average on a base that would make it meaningless.</li>
+  <li><code>_rows()</code> casts to <code>object</code> before nulling: on a float column pandas writes <code>NaN</code> back over <code>None</code>, and <code>json.dumps</code> would emit a bare <code>NaN</code>, which is not valid JSON. <code>allow_nan=False</code> makes that fail at build time rather than in someone's browser.</li>
+  <li>Charts the page never trends are trimmed to their last three survey years — history the browser would download and never look at.</li>
+</ul>
+
+<h3>Bundle shape</h3>
+
+<pre><code>series.json   { chartId: { unit, base, weightable, indicators,
+                           columns: [...], rows: [[...], ...] } }
+labels.json   { geo, size_emp, nace_r2, ind_type, indicator, unit }
+meta.json     { generated_utc, tables, sources, caveats }</code></pre>
+
+<p>
+  Rows are positional arrays rather than objects — roughly half the bytes — and are
+  rehydrated once, lazily, on the page. Current size:
+  <strong>13 charts, 43,721 rows, ~300 KB gzipped.</strong>
+</p>
+
+<h2>docs/app.js — the page</h2>
+
+<h3>The central abstraction</h3>
+<p>
+  Everything renders from a <strong>facet</strong>: a <code>{ geos, band }</code>
+  pair. <code>band</code> means a size class in the Companies view, a NACE section in
+  Industry, and an age band in Individuals — the only difference is which column
+  <code>DIMENSIONS[view].field</code> points at. That is why three views need one set
+  of renderers, and why adding the Industry view required almost no new rendering code.
+</p>
+
+<table>
+  <thead><tr><th>Function</th><th>Responsibility</th></tr></thead>
+  <tbody>
+    <tr><td><code>facets()</code></td><td>The one or two slices a chart draws. Comparing by band holds countries fixed; comparing by country holds the band fixed.</td></tr>
+    <tr><td><code>aggregateValues()</code></td><td>Combines countries — weighted by enterprise count where possible, plain mean otherwise, and reports which.</td></tr>
+    <tr><td><code>weightingMode()</code></td><td>Decides weighting once for a whole series, so a trend line cannot mix methods across years.</td></tr>
+    <tr><td><code>absoluteCounts()</code></td><td>Percentages → number of businesses, strictly same-year.</td></tr>
+    <tr><td><code>niceScale()</code></td><td>Rounds the axis <em>step</em>, not the max — rounding the max alone still yields ticks at 18.75.</td></tr>
+    <tr><td><code>overlapWarning()</code></td><td>Detects a band pair where one contains the other.</td></tr>
+  </tbody>
+</table>
+
+<h3>Chart primitives</h3>
+<p>
+  <code>rankedBars</code>, <code>groupedBars</code>, <code>lineChart</code>,
+  <code>ordinalBars</code> — plain inline SVG, no charting library. All four handle a
+  null value by marking it "Not published" rather than omitting the row.
+</p>
+
+<h3>Section renderers and the view registry</h3>
+<p>
+  <code>headlineTiles</code>, <code>trendCard</code>, <code>rankingCard</code>,
+  <code>comparisonCard</code>, <code>ordinalCard</code>, <code>breakdownRankCard</code>,
+  <code>countsCard</code> — each generic over the active dimension. <code>VIEWS</code>
+  is a declarative registry: each section supplies an id, a narrative
+  <code>part</code>, headings, and a <code>render</code> function, plus an optional
+  <code>available()</code> predicate that removes the section when its data does not
+  exist for the current selection.
+</p>
+
+<h3>State and URL</h3>
+<pre><code>state = {
+  view: "firm" | "sector" | "individual",
+  geos: ["IT", ...],                      // one country, or several averaged
+  firm | sector | individual: {
+    band, compareMode: "band" | "geo", compareBand, compareGeos
+  }
+}</code></pre>
+<p>
+  Mirrored to the query string on every change, so any state is a shareable link:
+  <code>?view=sector&amp;geo=IT,ES&amp;band=C&amp;by=geo&amp;vs=DE,NL</code>.
+</p>
+
+<h2>Adding things</h2>
+
+<table>
+  <thead><tr><th>To add…</th><th>Do this</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>An indicator to an existing chart</td>
+      <td>Append its code to the chart's <code>indicators</code> list in <code>export.py</code> and rebuild. An unknown code raises by name.</td>
+    </tr>
+    <tr>
+      <td>A new chart</td>
+      <td>Add an entry to <code>FIRM_CHARTS</code>, <code>SECTOR_CHARTS</code> or <code>INDIVIDUAL_CHARTS</code> with a single <code>unit</code>, then add a section to the relevant <code>VIEWS</code> entry.</td>
+    </tr>
+    <tr>
+      <td>A new individual-level breakdown</td>
+      <td>Add the raw <code>ind_type</code> code to <code>INDIVIDUAL_CUTS</code> with a <code>kind</code> and a short label.</td>
+    </tr>
+    <tr>
+      <td>A new dataset</td>
+      <td>Add a <code>DatasetSpec</code> to <code>config.DATASETS</code>, then rerun <code>fetch_data.py</code>. Normalisation will raise on any unmapped category, which is the intended behaviour.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Deployment</h2>
+
+<p>
+  GitHub Pages serves the <code>docs/</code> folder from <code>main</code> — hence the
+  folder name, since Pages offers only the repository root or <code>/docs</code>.
+  There is no build step on the server, so <code>docs/data/*.json</code> must be
+  committed. The consequence worth remembering:
+</p>
+
+<div class="rule warn">
+  <h4>Python changes need a rebuild <em>and</em> a commit of the JSON</h4>
+  <p>
+    Editing HTML, CSS or JS only needs a browser refresh. Changing the pipeline or a
+    chart spec without rerunning <code>build_site.py</code> — or rerunning it without
+    committing <code>docs/data/</code> — leaves the published numbers out of step
+    with the code that claims to produce them.
+  </p>
+</div>
+
+<footer>
+  <p>
+    Previous: <a href="design.html">design &amp; method</a> ·
+    <a href="index.html">what this is for</a> ·
+    <a href="../">the portal itself</a>
+  </p>
+</footer>
+
+</main>
+</body>
+</html>

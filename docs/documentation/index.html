@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What this is for — SME Digital &amp; AI Readiness</title>
+<meta name="description" content="What the SME Digital & AI Readiness portal shows, who it is for, and what it can and cannot tell you.">
+<link rel="stylesheet" href="doc.css">
+</head>
+<body>
+
+<div class="top">
+  <div class="wrap">
+    <p class="eyebrow">Documentation · Level 1 of 3</p>
+    <h1>What this is for</h1>
+    <p class="lede">
+      A live reading of how far Europe's small businesses have got with AI, built
+      from Eurostat's own surveys — and honest about what those surveys cannot say.
+    </p>
+    <nav class="docnav">
+      <a href="index.html" aria-current="page">1 · Value</a>
+      <a href="design.html">2 · Design &amp; method</a>
+      <a href="code.html">3 · Code</a>
+      <span class="spacer"></span>
+      <a href="../" class="live">Open the portal ↗</a>
+    </nav>
+  </div>
+</div>
+
+<main class="wrap">
+
+<h2>The problem it addresses</h2>
+
+<p class="intro">
+  The gap between small and large firms on AI is well documented at policy level and
+  almost never translated into something a business owner can read in five minutes.
+  The statistics exist, spread across seventeen Eurostat tables and 291 indicators
+  whose codes mean nothing without a codebook. This turns that into a page.
+</p>
+
+<div class="stats">
+  <div class="stat"><div class="n">17.0%</div><div class="l">of EU small firms use AI</div></div>
+  <div class="stat"><div class="n alt">55.0%</div><div class="l">of large firms do</div></div>
+  <div class="stat"><div class="n">3.2×</div><div class="l">the gap, EU27, 2025</div></div>
+</div>
+
+<h2>The argument it makes</h2>
+
+<p>
+  The obvious headline — <em>small firms lag large ones</em> — is true and changes
+  nobody's mind. The data supports something sharper: <strong>the AI gap is not a
+  technology gap. It is a capability gap, it is concentrated, and it is the kind of
+  thing that can be bought.</strong> The portal is organised to make that case in
+  three moves.
+</p>
+
+<h3>1 · It is large, and it is a number</h3>
+<p>
+  Percentages are arguable. In Italy alone, roughly <strong>195,000 small businesses
+  are not using AI</strong> — from 209,000 firms of that size, of which around 14,000
+  are. The portal shows this as a count of companies whenever the business register
+  and the survey cover the same year.
+</p>
+
+<h3>2 · It is not evenly spread</h3>
+<p>
+  The gap tracks what work a business does and who it can hire far more than headline
+  size alone.
+</p>
+
+<table>
+  <thead><tr><th>Divide</th><th>Top</th><th class="num">%</th><th>Bottom</th><th class="num">%</th><th class="num">Spread</th></tr></thead>
+  <tbody>
+    <tr><td>Sector (EU27, 2025)</td><td>Information &amp; communication</td><td class="num">62.5</td><td>Construction</td><td class="num">10.8</td><td class="num">5.8×</td></tr>
+    <tr><td>Occupation (EU27, 2025)</td><td>ICT professionals</td><td class="num">72.7</td><td>Manual workers</td><td class="num">17.6</td><td class="num">4.1×</td></tr>
+    <tr><td>Firm size (EU27, 2025)</td><td>250+ employees</td><td class="num">55.0</td><td>10–49 employees</td><td class="num">17.0</td><td class="num">3.2×</td></tr>
+    <tr><td>Place (EU27, 2025)</td><td>Cities</td><td class="num">39.9</td><td>Rural areas</td><td class="num">24.5</td><td class="num">1.6×</td></tr>
+  </tbody>
+</table>
+
+<h3>3 · Non-adopters say why, and it is not the technology</h3>
+<p>
+  Eurostat asks the firms that considered AI and decided against it. Among Italian
+  small firms: <strong>a lack of relevant expertise 59%</strong>, cost 45%, difficulty
+  with data 47% — and <em>"AI is not useful for us"</em> only 16%. The obstacle is
+  capability, not conviction.
+</p>
+
+<h2>What you can do with it</h2>
+
+<table>
+  <thead><tr><th>View</th><th>Unit of observation</th><th>Answers</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Companies</strong></td><td>An enterprise with 10+ employees</td><td>How adoption differs by size band, and what sits underneath it — cloud, analytics, security, digital presence, ICT skills.</td></tr>
+    <tr><td><strong>Industry</strong></td><td>An enterprise with 10+ employees</td><td>How eleven sectors compare, which AI technologies each actually runs, and how a sector varies across Europe.</td></tr>
+    <tr><td><strong>Individuals</strong></td><td>A person aged 16–74</td><td>Who is actually using generative AI — by age, occupation, education, where they live, and work status.</td></tr>
+  </tbody>
+</table>
+
+<p>
+  In every view you pick one or more countries and a band, then choose whether to
+  compare that band against another band or against another country. Multi-country
+  selections combine into a single weighted average, the same way Eurostat builds the
+  EU27 figure. Every chart has a table view behind it, and every link is shareable —
+  the URL carries the whole selection.
+</p>
+
+<h2>Why the numbers can be trusted</h2>
+
+<p>
+  Most of the engineering effort here went into <em>not</em> producing plausible
+  nonsense. Four examples of what the portal refuses to do:
+</p>
+
+<div class="rule">
+  <h4>It never recomputes the EU27 figure</h4>
+  <p>Eurostat's published aggregate is weighted by how many businesses each country has. An average of the member states is a different number. The portal displays the published one, so it always matches Eurostat's own tables.</p>
+</div>
+
+<div class="rule">
+  <h4>It never mixes percentages with different denominators</h4>
+  <p>Not every percentage is out of the same group. "Why firms stay out" counts only the firms that actually considered AI. Two figures that both read 40% can mean quite different things, so each chart states the group it counts.</p>
+</div>
+
+<div class="rule">
+  <h4>It marks what Eurostat withheld instead of hiding it</h4>
+  <p>Where too few surveyed businesses fall into a cell, Eurostat publishes no number. Those rows stay on the chart labelled "Not published" — a blank means "too small to measure", never "nobody does this".</p>
+</div>
+
+<div class="rule warn">
+  <h4>It shows gaps, not causes</h4>
+  <p>Everything here is an association. A country doing well may differ in a dozen ways the survey never records. The portal is explicit about this rather than implying that closing one gap would close another.</p>
+</div>
+
+<h2>What it cannot tell you</h2>
+
+<ul>
+  <li><strong>Nothing about businesses under 10 employees.</strong> The EU survey does not reach them, though they are the majority of firms in Europe. Every "small firm" figure here means 10–49 employees.</li>
+  <li><strong>No sector breakdown by company size.</strong> Eurostat never crosses the two, so "small firms in construction" does not exist in this data — only "firms in construction".</li>
+  <li><strong>No causal claims.</strong> See above.</li>
+  <li><strong>Nothing outside Europe,</strong> and nothing more recent than the latest survey wave.</li>
+</ul>
+
+<footer>
+  <p>
+    Next: <a href="design.html">how it was designed and the rules it follows</a> ·
+    <a href="code.html">what the code does</a> ·
+    <a href="../">the portal itself</a>
+  </p>
+</footer>
+
+</main>
+</body>
+</html>
