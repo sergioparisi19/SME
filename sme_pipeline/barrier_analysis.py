@@ -37,10 +37,14 @@ The exported `sign` exists so the page can say so rather than imply a driver.
 from __future__ import annotations
 
 import itertools
+import json
 import math
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
+
+from .config import PROCESSED_DIR
 
 # The three disjoint tiers. SME_10_249 and ALL_GE10 contain these, so including
 # them would put the same countries in the model twice.
@@ -78,6 +82,21 @@ TIER_LABELS = {
 STABILITY_THRESHOLD = 0.60
 BOOTSTRAP_DRAWS = 400
 SEED = 7
+
+
+# The composite row is a plain mean of the modelled countries, so it needs a
+# name of its own - it is not a place.
+ALL_MEAN = "ALL_MEAN"
+ALL_MEAN_LABEL = "All countries (unweighted mean)"
+
+
+def geo_labels() -> dict[str, str]:
+    """Country names, read from the datamap that ships beside the Parquet."""
+    path = PROCESSED_DIR / "firm_level.datamap.json"
+    if not path.exists():
+        return {}
+    codes = json.loads(path.read_text(encoding="utf-8"))["columns"]["geo"]["codes"]
+    return {**codes, ALL_MEAN: ALL_MEAN_LABEL}
 
 
 def _panel(df: pd.DataFrame, tier: str) -> pd.DataFrame:
@@ -254,7 +273,7 @@ def _aggregate_targets(df: pd.DataFrame, tier: str, panel: pd.DataFrame) -> pd.D
     return pd.DataFrame(frames)
 
 
-def by_country(df: pd.DataFrame) -> pd.DataFrame:
+def by_country(df: pd.DataFrame, labels: dict[str, str] | None = None) -> pd.DataFrame:
     """Split each country's adoption gap into per-barrier contributions.
 
     This is NOT a model per country. A country has four observations - 2021,
@@ -277,12 +296,18 @@ def by_country(df: pd.DataFrame) -> pd.DataFrame:
     The residual is what the barriers do not explain, and it is reported rather
     than hidden so the contributions cannot be mistaken for the whole story.
     """
+    names = geo_labels() if labels is None else labels
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     frames = []
     for tier in TIERS:
         panel = _panel(df, tier)
         if len(panel) < 40:
             continue
         beta, fitted, context, context_by_year = _fit(panel)
+        resid_y, resid_x, total_ss, base_rss = _prepare(panel)
+        delta_r2 = round(
+            (base_rss - _rss(resid_y, resid_x, tuple(range(len(BARRIERS))))) / total_ss, 3)
         means = panel[BARRIERS].mean()
         offset = float((means * pd.Series(beta)).sum())
 
@@ -301,10 +326,12 @@ def by_country(df: pd.DataFrame) -> pd.DataFrame:
 
             for code in BARRIERS:
                 deviation = block[code].to_numpy(dtype=float) - means[code]
+                geos = block["geo"].to_numpy()
                 frames.append(pd.DataFrame({
+                    "country": [names.get(g, g) for g in geos],
+                    "geo": geos,
                     "tier": TIER_LABELS.get(tier, tier),
                     "tier_code": tier,
-                    "geo": block["geo"].to_numpy(),
                     "year": block["time"].to_numpy(),
                     "in_model": in_model,
                     "barrier": [SHORT_LABELS.get(code, code)] * len(block),
@@ -318,11 +345,25 @@ def by_country(df: pd.DataFrame) -> pd.DataFrame:
                     "expected_adoption_pct": expected.round(1),
                     "gap_pp": (actual - expected).round(1),
                     "unexplained_pp": residual.round(2),
+                    # Model context, repeated on every row so a filtered export
+                    # still says what it was fitted on.
+                    "tier_n_cells": len(panel),
+                    "tier_n_countries": int(panel["geo"].nunique()),
+                    "tier_delta_r2": delta_r2,
+                    "outcome_code": OUTCOME,
+                    "outcome_unit": OUTCOME_UNIT,
+                    "exposure_unit": BARRIER_UNIT,
+                    "generated_utc": stamp,
                 }))
     if not frames:
         return pd.DataFrame()
     out = pd.concat(frames, ignore_index=True)
-    return out.sort_values(["tier_code", "geo", "year", "barrier_code"]).reset_index(drop=True)
+
+    # Which barrier moves this country's gap most, regardless of direction.
+    out["rank_in_unit"] = (out.groupby(["tier_code", "geo", "year"])["contribution_pp"]
+                           .transform(lambda v: v.abs().rank(ascending=False, method="first"))
+                           .astype(int))
+    return out.sort_values(["tier_code", "country", "year", "rank_in_unit"]).reset_index(drop=True)
 
 
 def analyse(df: pd.DataFrame, draws: int = BOOTSTRAP_DRAWS, seed: int = SEED) -> dict:

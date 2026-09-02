@@ -16,6 +16,9 @@ Two files come out.
 `barrier_importance.csv` - one row per size tier and barrier: which barriers
 separate high-adoption countries from low-adoption ones, and how firmly.
 
+Country names are carried on both files, and every row repeats the model context
+it came from, so a filtered export still says what it was fitted on.
+
 `barrier_contributions_by_country.csv` - the same model read country by country:
 each country's actual adoption, what the model expects of a country with average
 barrier levels that year, and how much of the difference each barrier accounts
@@ -46,6 +49,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -56,16 +60,20 @@ from sme_pipeline.config import PROCESSED_DIR, PROJECT_ROOT
 DEFAULT_OUT = PROJECT_ROOT / "data" / "analysis" / "barrier_importance.csv"
 
 FIELDS = [
-    "tier", "rank", "barrier", "barrier_full", "barrier_code", "share_pct",
-    "ci_low_pct", "ci_high_pct", "first_place_rate",
+    "tier", "tier_code", "rank", "barrier", "barrier_full", "barrier_code",
+    "share_pct", "ci_low_pct", "ci_high_pct", "first_place_rate",
     "direction", "corr_with_adoption", "exposure_eu27_pct",
-    "n_cells", "n_countries", "years", "delta_r2", "lead_share", "tier_published",
+    "n_cells", "n_countries", "years",
+    "r2_years_only", "r2_with_barriers", "delta_r2",
+    "lead_share", "stability_threshold", "bootstrap_draws", "tier_published",
+    "outcome_code", "outcome_unit", "exposure_unit", "generated_utc",
 ]
 
 TIER_NAMES = barrier_analysis.TIER_LABELS
 
 
-def rows_from(result: dict, labels: dict[str, str]) -> list[dict]:
+def rows_from(result: dict, labels: dict[str, str], draws: int | None = None) -> list[dict]:
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     out: list[dict] = []
     for tier, model in result["tiers"].items():
         ranked = sorted(model["barriers"].items(), key=lambda kv: -kv[1]["share"])
@@ -73,6 +81,7 @@ def rows_from(result: dict, labels: dict[str, str]) -> list[dict]:
             interval = b.get("interval") or [None, None]
             out.append({
                 "tier": TIER_NAMES.get(tier, tier),
+                "tier_code": tier,
                 "rank": rank,
                 "barrier": barrier_analysis.SHORT_LABELS.get(code, code),
                 "barrier_full": labels.get(code, code),
@@ -87,10 +96,33 @@ def rows_from(result: dict, labels: dict[str, str]) -> list[dict]:
                 "n_cells": model["n"],
                 "n_countries": model["countries"],
                 "years": " ".join(model["years"]),
+                "r2_years_only": model["r2_years_only"],
+                "r2_with_barriers": model["r2_with_barriers"],
                 "delta_r2": model["delta_r2"],
                 "lead_share": model["lead_share"],
+                "stability_threshold": result["stability_threshold"],
+                "bootstrap_draws": draws,
                 "tier_published": model["published"],
+                "outcome_code": result["outcome"],
+                "outcome_unit": result["outcome_unit"],
+                "exposure_unit": result["exposure_unit"],
+                "generated_utc": stamp,
             })
+    return out
+
+
+def enrich_country(country: pd.DataFrame, result: dict) -> pd.DataFrame:
+    """Carry the stability verdict onto the per-country rows.
+
+    `by_country` deliberately does not bootstrap - it reads coefficients, not a
+    ranking, and re-running 400 draws to label a row would triple its cost. But
+    someone reading contributions for a tier whose ranking did not survive
+    resampling should be told, so the runner joins the verdict on here, where it
+    is already known.
+    """
+    stable = {tier: model["published"] for tier, model in result["tiers"].items()}
+    out = country.copy()
+    out["tier_ranking_stable"] = out["tier_code"].map(stable)
     return out
 
 
@@ -108,7 +140,7 @@ def main() -> None:
 
     print(f"Fitting {len(barrier_analysis.TIERS)} tier models, {args.draws} bootstrap draws each...")
     result = barrier_analysis.analyse(firm, draws=args.draws, seed=args.seed)
-    rows = rows_from(result, names)
+    rows = rows_from(result, names, draws=args.draws)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     summary_path = args.out_dir / "barrier_importance.csv"
@@ -130,7 +162,7 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(rows)
 
-    country = barrier_analysis.by_country(firm)
+    country = enrich_country(barrier_analysis.by_country(firm), result)
     country.to_csv(country_path, index=False, encoding="utf-8")
 
     print(f"\nWrote {len(rows)} rows to {summary_path}")
