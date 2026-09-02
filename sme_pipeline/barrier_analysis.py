@@ -22,10 +22,10 @@ so a coefficient is not a contribution. The Shapley decomposition splits the R2
 the block adds beyond year effects into non-negative parts that sum to it, which
 is what makes "share of the explained gap" a meaningful axis.
 
-*A stability gate.* The output is a ranking, so the ranking has to survive
-resampling countries. Tiers whose leading barrier is not reliably leading are
-withheld rather than published with a caveat - a quadrant chart makes an
-undetermined ranking look authoritative, which is the failure mode to avoid.
+*A stability flag, not a filter.* The output is a ranking, so the ranking has to
+survive resampling countries. Every tier is reported, but one whose leading
+barrier is not reliably leading is flagged `published=False` - a caller may want
+to see an undetermined ranking, but nothing should present one as settled.
 
 Nothing here is causal. The barrier percentages are measured on the firms that
 considered AI and declined, a population defined partly by the outcome, so a
@@ -71,6 +71,16 @@ def _panel(df: pd.DataFrame, tier: str) -> pd.DataFrame:
                 .pivot_table(index=["geo", "time"], columns="indicator", values="value"))
     panel = barriers.join(outcome, how="inner").reset_index()
     return panel.dropna(subset=BARRIERS + ["y"])
+
+
+def _eu_exposure(df: pd.DataFrame, tier: str) -> dict[str, float]:
+    """How widely each barrier is cited EU-wide, as a reference for the shares."""
+    rows = df[df["nace_r2"].isna() & (df["geo"] == "EU27_2020") & (df["size_emp"] == tier)
+              & (df["unit"] == BARRIER_UNIT) & (df["indicator"].isin(BARRIERS))]
+    if rows.empty:
+        return {}
+    latest = rows[rows["time"] == rows["time"].max()]
+    return {r.indicator: round(float(r.value), 1) for r in latest.itertuples()}
 
 
 def _prepare(panel: pd.DataFrame):
@@ -170,9 +180,8 @@ def _bootstrap(panel: pd.DataFrame, draws: int, seed: int) -> dict:
 
 
 def analyse(df: pd.DataFrame, draws: int = BOOTSTRAP_DRAWS, seed: int = SEED) -> dict:
-    """Run the decomposition for every tier and keep the ones that hold up."""
+    """Run the decomposition for every tier, flagging which ones hold up."""
     tiers: dict[str, dict] = {}
-    withheld: dict[str, float] = {}
 
     for tier in TIERS:
         panel = _panel(df, tier)
@@ -184,13 +193,11 @@ def analyse(df: pd.DataFrame, draws: int = BOOTSTRAP_DRAWS, seed: int = SEED) ->
         if not (added > 0):
             continue
         corr = panel[BARRIERS].corrwith(panel["y"])
+        eu = _eu_exposure(df, tier)
         boot = _bootstrap(panel, draws, seed)
 
-        if boot["lead_share"] < STABILITY_THRESHOLD:
-            withheld[tier] = round(boot["lead_share"], 3)
-            continue
-
         tiers[tier] = {
+            "published": boot["lead_share"] >= STABILITY_THRESHOLD,
             "n": int(len(panel)),
             "countries": int(panel["geo"].nunique()),
             "years": sorted(panel["time"].unique().tolist()),
@@ -209,6 +216,7 @@ def analyse(df: pd.DataFrame, draws: int = BOOTSTRAP_DRAWS, seed: int = SEED) ->
                     # it where adoption is HIGHER, which is not a driver.
                     "sign": -1 if corr[code] < 0 else 1,
                     "corr": round(float(corr[code]), 2),
+                    "exposure_eu27": eu.get(code),
                 }
                 for code, value in contributions.items()
             },
@@ -222,5 +230,4 @@ def analyse(df: pd.DataFrame, draws: int = BOOTSTRAP_DRAWS, seed: int = SEED) ->
         "indicators": BARRIERS,
         "stability_threshold": STABILITY_THRESHOLD,
         "tiers": tiers,
-        "withheld": withheld,
     }
