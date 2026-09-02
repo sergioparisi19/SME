@@ -258,6 +258,11 @@ nav.analyses a[aria-current="true"] {
 }
 .dd-option .geo-badge { background: var(--ink-muted); }
 .dd-option[aria-selected="true"] .geo-badge { background: var(--series-1); }
+.dd-badges { display: inline-flex; gap: 3px; flex: none; }
+.dd-foot {
+  border-top: 1px solid var(--border); padding: 8px 12px;
+  font-size: 11px; color: var(--ink-muted);
+}
 
 /* --- Masthead ----------------------------------------------------------- */
 

@@ -41,7 +41,7 @@ const CONTAINS = {
 
 const state = {
   view: "firm",
-  geo: "IT",
+  geos: ["IT"],           // one country, or several averaged together
   firm: {
     band: "SMALL_10_49",
     compareMode: "band",          // band | geo
@@ -159,28 +159,88 @@ function facets() {
   const s = sel(), d = dim();
   const byBand = s.compareMode === "band";
   const a = {
-    geo: state.geo, band: s.band, slot: SERIES_SLOTS[0],
-    label: byBand ? d.labelOf(s.band) : label("geo", state.geo),
+    geos: state.geos, band: s.band, slot: SERIES_SLOTS[0],
+    label: byBand ? d.labelOf(s.band) : geosLabel(state.geos),
   };
   const b = byBand
-    ? { geo: state.geo, band: s.compareBand, slot: SERIES_SLOTS[1],
+    ? { geos: state.geos, band: s.compareBand, slot: SERIES_SLOTS[1],
         label: d.labelOf(s.compareBand) }
-    : { geo: s.compareGeo, band: s.band, slot: SERIES_SLOTS[1],
+    : { geos: [s.compareGeo], band: s.band, slot: SERIES_SLOTS[1],
         label: label("geo", s.compareGeo) };
 
   // Same slice twice is one series, not two identical bars.
-  if (a.geo === b.geo && a.band === b.band) return [a];
-  return [a, b];
+  const same = a.band === b.band
+    && a.geos.length === b.geos.length && a.geos.every((g) => b.geos.includes(g));
+  return same ? [a] : [a, b];
 }
+
+/** How a country selection names itself: one country, or a count of them. */
+const geosLabel = (geos) =>
+  (geos.length === 1 ? label("geo", geos[0]) : `${geos.length} countries (average)`);
 
 /** What stays fixed across the comparison - it belongs in the title, not the legend. */
 function heldConstant() {
   const s = sel();
-  return s.compareMode === "band" ? label("geo", state.geo) : dim().labelOf(s.band);
+  return s.compareMode === "band" ? geosLabel(state.geos) : dim().labelOf(s.band);
 }
 
-const facetValue = (chartId, indicator, f, time) =>
-  where(chartId, { indicator, [dim().field]: f.band, time, geo: f.geo })[0]?.value ?? null;
+/**
+ * Combine one value per country into a single figure, the way Eurostat builds
+ * EU27: weighted by how many enterprises each country has, not a plain mean of
+ * the countries. The two differ a lot, because adoption tracks economy size.
+ *
+ * Weighting needs an enterprise count, which exists only for a unit that is a
+ * share of all enterprises, and only for 2021-2024. Where it is missing the
+ * result falls back to an unweighted mean, and `weighted` says which happened
+ * so the caller can label it honestly rather than implying precision it lacks.
+ */
+function aggregateValues(records, weightable) {
+  if (!records.length) return null;
+  if (records.length === 1) {
+    return { value: records[0].value, weighted: false, n: 1 };
+  }
+  const counts = records.map((r) => r.enterprise_count);
+  const canWeight = weightable !== false
+    && counts.every((c) => typeof c === "number" && c > 0);
+  if (canWeight) {
+    const total = counts.reduce((a, b) => a + b, 0);
+    return {
+      value: records.reduce((acc, r) => acc + r.value * r.enterprise_count, 0) / total,
+      weighted: true, n: records.length,
+    };
+  }
+  return {
+    value: records.reduce((acc, r) => acc + r.value, 0) / records.length,
+    weighted: false, n: records.length,
+  };
+}
+
+/**
+ * Decide once, for a whole series, whether it can be weighted.
+ *
+ * Enterprise counts only exist for 2021-2024, so deciding year by year would
+ * weight a trend's 2024 point and not its 2025 one - two different methods
+ * inside one line, and a step in the series that is an artefact of the method
+ * rather than anything in the data. If any year the series needs is missing a
+ * count, the whole series falls back to a plain average.
+ */
+function weightingMode(chartId, indicator, f, times) {
+  if (SERIES[chartId].weightable !== true) return false;
+  if (f.geos.length < 2) return false;
+  return times.every((t) => {
+    const recs = where(chartId, { indicator, [dim().field]: f.band, time: t, geo: f.geos });
+    return recs.length === f.geos.length
+      && recs.every((r) => typeof r.enterprise_count === "number" && r.enterprise_count > 0);
+  });
+}
+
+function facetStat(chartId, indicator, f, time, weightable) {
+  const recs = where(chartId, { indicator, [dim().field]: f.band, time, geo: f.geos });
+  return aggregateValues(recs, weightable);
+}
+
+const facetValue = (chartId, indicator, f, time, weightable) =>
+  facetStat(chartId, indicator, f, time, weightable)?.value ?? null;
 
 function bandsOverlap(a, b) {
   if (a === b) return true;
@@ -599,8 +659,11 @@ function headlineTiles(root, { chartId, indicator }) {
     return node;
   };
 
-  const a = facetValue(chartId, indicator, fs[0], year);
-  const b = fs[1] ? facetValue(chartId, indicator, fs[1], year) : null;
+  const wA = weightingMode(chartId, indicator, fs[0], [year]);
+  const a = facetValue(chartId, indicator, fs[0], year, wA);
+  const b = fs[1]
+    ? facetValue(chartId, indicator, fs[1], year, weightingMode(chartId, indicator, fs[1], [year]))
+    : null;
   const who = `${heldConstant()}, ${year}`;
   tiles.appendChild(tile(fs[0].label, `${fmt(a)}%`, who, "accent", SERIES_SLOTS[0]));
   if (fs[1]) tiles.appendChild(tile(fs[1].label, `${fmt(b)}%`, who, "compare", SERIES_SLOTS[1]));
@@ -610,6 +673,13 @@ function headlineTiles(root, { chartId, indicator }) {
   tiles.appendChild(tile("EU27 benchmark", `${fmt(ref?.value)}%`,
     `Eurostat's published aggregate · ${dim().labelOf(sel().band)}`));
   root.appendChild(tiles);
+
+  const stat = facetStat(chartId, indicator, fs[0], year, wA);
+  if (state.geos.length > 1) {
+    root.appendChild(el("p", { class: "card-warn", text: stat?.weighted
+      ? `${state.geos.length} countries combined the way Eurostat builds EU27 — weighted by how many enterprises each country has, not a plain average of the countries.`
+      : `${state.geos.length} countries combined as a plain average, each country counting equally. No enterprise counts are available for this measure or year, so they cannot be weighted the way EU27 is.` }));
+  }
 }
 
 function trendCard(root, { chartId, indicator, title, note }) {
@@ -625,16 +695,21 @@ function trendCard(root, { chartId, indicator, title, note }) {
     title: `${title} — ${heldConstant()}`,
     note, warn: overlapWarning(),
     draw: (c) => lineChart(c, xs, [
-      ...fs.map((f) => ({
-        label: f.label, slot: f.slot,
-        points: xs.map((t) => ({ y: facetValue(chartId, indicator, f, t) })),
-      })),
+      ...fs.map((f) => {
+        const w = weightingMode(chartId, indicator, f, xs);
+        return {
+          label: f.label, slot: f.slot,
+          points: xs.map((t) => ({ y: facetValue(chartId, indicator, f, t, w) })),
+        };
+      }),
       { label: `EU27 · ${d.labelOf(sel().band)}`, reference: true,
         points: xs.map((t) => ({ y: eu(t) })) },
     ], { unitNote }),
     table: () => ({
       columns: ["Year", ...fs.map((f) => f.label), "EU27"],
-      rows: xs.map((t) => [t, ...fs.map((f) => fmt(facetValue(chartId, indicator, f, t))), fmt(eu(t))]),
+      rows: xs.map((t) => [t,
+        ...fs.map((f) => fmt(facetValue(chartId, indicator, f, t, weightingMode(chartId, indicator, f, xs)))),
+        fmt(eu(t))]),
     }),
   });
 }
@@ -647,8 +722,9 @@ function rankingCard(root, { chartId, indicator, title, note }) {
   const build = () => where(chartId, { indicator, [d.field]: s.band, time: year })
     .map((r) => ({
       code: r.geo, label: shortGeo(r.geo), value: r.value,
-      highlight: r.geo === state.geo || (s.compareMode === "geo" && r.geo === s.compareGeo),
-      alt: s.compareMode === "geo" && r.geo === s.compareGeo && r.geo !== state.geo,
+      highlight: state.geos.includes(r.geo)
+        || (s.compareMode === "geo" && r.geo === s.compareGeo),
+      alt: s.compareMode === "geo" && r.geo === s.compareGeo && !state.geos.includes(r.geo),
       reference: r.geo === REF_GEO,
     }))
     .sort((a, b) => b.value - a.value);
@@ -678,7 +754,8 @@ function comparisonCard(root, chartId, { title, note, indicators }) {
       // the left edge of the plot. The tooltip and table keep the full wording.
       return { code, label: full, short: shortLabel(full, 46) };
     })
-    .filter((cat) => fs.some((f) => facetValue(chartId, cat.code, f, year) !== null));
+    .filter((cat) => fs.some((f) => facetValue(chartId, cat.code, f, year,
+      weightingMode(chartId, cat.code, f, [year])) !== null));
 
   // Rows run in descending order of the EU27 figure, not of the selection.
   // Sorting on the selection would reshuffle rows every time the reader changes
@@ -692,7 +769,8 @@ function comparisonCard(root, chartId, { title, note, indicators }) {
 
   const series = fs.map((f) => ({
     label: f.label, slot: f.slot,
-    values: categories.map((cat) => facetValue(chartId, cat.code, f, year)),
+    values: categories.map((cat) => facetValue(chartId, cat.code, f, year,
+      weightingMode(chartId, cat.code, f, [year]))),
   }));
 
   card(root, {
@@ -713,12 +791,15 @@ function ordinalCard(root, { chartId, indicator, options, title, note, kindLabel
   const year = latestYear(chartId, { indicator });
   const items = options.map((code) => ({
     code, label: d.labelOf(code),
-    value: where(chartId, { indicator, [d.field]: code, time: year, geo: state.geo })[0]?.value ?? null,
+    value: aggregateValues(
+      where(chartId, { indicator, [d.field]: code, time: year, geo: state.geos }),
+      weightingMode(chartId, indicator, { geos: state.geos, band: code }, [year]),
+    )?.value ?? null,
   }));
   const picked = facets().filter((f) => options.includes(f.band)).map((f) => f.band);
 
   card(root, {
-    title: `${title} — ${label("geo", state.geo)}, ${year}`,
+    title: `${title} — ${geosLabel(state.geos)}, ${year}`,
     note,
     draw: (c) => ordinalBars(c, items, { unitNote, highlight: picked }),
     table: () => ({
@@ -883,40 +964,57 @@ const VIEWS = {
  * A searchable single-select. A native <select> over 34 countries cannot show
  * the colour a country carries in the charts, and cannot be typed into.
  */
-function countryPicker(host, { options, onPick, current }) {
+function countryPicker(host, { options, selected, onToggle }) {
   host.innerHTML = "";
   const button = el("button", {
     class: "dd-button", type: "button", id: "dd-geo-button",
     "aria-haspopup": "listbox", "aria-expanded": "false",
   });
-  const badge = el("span", { class: "geo-badge" });
+  const badges = el("span", { class: "dd-badges" });
   const value = el("span", { class: "dd-value" });
-  button.appendChild(badge);
+  button.appendChild(badges);
   button.appendChild(value);
   button.appendChild(el("span", { class: "dd-caret", text: "▼" }));
 
   const panel = el("div", { class: "dd-panel", role: "listbox", hidden: "" });
-  const search = el("input", { class: "dd-search", type: "search", placeholder: "Search countries…" });
+  const search = el("input", {
+    class: "dd-search", type: "search", placeholder: "Search countries…",
+  });
   const list = el("div", { class: "dd-list" });
+  const foot = el("p", { class: "dd-foot" });
   panel.appendChild(search);
   panel.appendChild(list);
+  panel.appendChild(foot);
   host.appendChild(button);
   host.appendChild(panel);
 
   function paintButton() {
-    const code = current();
-    badge.textContent = geoBadge(code);
-    value.textContent = label("geo", code);
+    const picked = selected();
+    // Three badges is what fits the button; past that the count carries it.
+    badges.innerHTML = "";
+    picked.slice(0, 3).forEach((code) => badges.appendChild(
+      el("span", { class: "geo-badge", text: geoBadge(code) })));
+    value.textContent = picked.length === 1
+      ? label("geo", picked[0])
+      : `${picked.length} countries`;
+    foot.textContent = picked.length === 1
+      ? "Pick more to see their combined average."
+      : `${picked.length} selected · combined into one averaged series.`;
   }
 
   function paintList() {
     const q = search.value.trim().toLowerCase();
+    const picked = selected();
     list.innerHTML = "";
     options
       .filter((code) => !q || label("geo", code).toLowerCase().includes(q)
         || geoBadge(code).toLowerCase().startsWith(q))
+      // Selected countries lead the list, so a shared link shows its selection
+      // without the reader having to scroll for it.
+      .sort((a, b) => (picked.includes(b) - picked.includes(a))
+        || label("geo", a).localeCompare(label("geo", b)))
       .forEach((code) => {
-        const on = code === current();
+        const on = picked.includes(code);
         const opt = el("button", {
           class: "dd-option", type: "button", role: "option", "aria-selected": String(on),
         });
@@ -924,8 +1022,9 @@ function countryPicker(host, { options, onPick, current }) {
         opt.appendChild(el("span", { text: label("geo", code) }));
         if (on) opt.appendChild(el("span", { class: "dd-check", text: "✓" }));
         opt.addEventListener("click", () => {
-          onPick(code);
-          close();
+          onToggle(code);
+          paintButton();
+          paintList();
         });
         list.appendChild(opt);
       });
@@ -1043,13 +1142,15 @@ const geoOptions = () => [...new Set(rows("ai_adoption").map((r) => r.geo))]
 function buildControls() {
   geoPicker = countryPicker(document.getElementById("dd-geo"), {
     options: geoOptions(),
-    current: () => state.geo,
-    onPick: (code) => {
-      // Never let the two sides of a country comparison be the same country.
-      if (sel().compareMode === "geo" && sel().compareGeo === code) {
-        sel().compareGeo = state.geo;
+    selected: () => state.geos,
+    onToggle: (code) => {
+      const i = state.geos.indexOf(code);
+      if (i >= 0) {
+        if (state.geos.length === 1) return;   // never leave the page with none
+        state.geos.splice(i, 1);
+      } else {
+        state.geos.push(code);
       }
-      state.geo = code;
       commit();
     },
   });
@@ -1090,7 +1191,7 @@ function syncUrl() {
   const s = sel();
   const params = new URLSearchParams();
   params.set("view", state.view);
-  params.set("geo", state.geo);
+  params.set("geo", state.geos.join(","));
   params.set("band", s.band);
   params.set("by", s.compareMode);
   params.set("vs", s.compareMode === "band" ? s.compareBand : s.compareGeo);
@@ -1101,7 +1202,9 @@ function readUrl() {
   const p = new URLSearchParams(location.search);
   if (VIEWS[p.get("view")]) state.view = p.get("view");
   const s = sel(), opts = DIMENSIONS[state.view].options;
-  if (p.get("geo") && LABELS.geo[p.get("geo")] && p.get("geo") !== REF_GEO) state.geo = p.get("geo");
+  const geos = (p.get("geo") || "").split(",")
+    .filter((g) => LABELS.geo[g] && g !== REF_GEO);
+  if (geos.length) state.geos = geos;
   if (opts.includes(p.get("band"))) s.band = p.get("band");
   if (p.get("by") === "band" || p.get("by") === "geo") s.compareMode = p.get("by");
   const vs = p.get("vs");
