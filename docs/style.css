@@ -244,20 +244,20 @@ nav.analyses a[aria-current="true"] {
   font: inherit; font-size: 13.5px; color: var(--ink-2); cursor: pointer; text-align: left;
 }
 .dd-option:hover { background: var(--sunken); color: var(--ink); }
-.dd-option[aria-selected="true"] { color: var(--ink); font-weight: 600; }
-.dd-box {
-  width: 15px; height: 15px; border-radius: 4px; flex: none;
-  border: 1.5px solid var(--axis); display: grid; place-items: center;
-  font-size: 10px; color: #fff;
+.dd-option[aria-selected="true"] { color: var(--ink); font-weight: 600; background: var(--sunken); }
+.dd-check { margin-left: auto; color: var(--series-1); font-weight: 700; }
+
+/* A country code, not a flag emoji: Windows ships no flag glyphs, so an emoji
+   flag degrades there to the bare letter pair anyway. The badge renders the
+   same on every platform and carries the series colour with it. */
+.geo-badge {
+  flex: none; display: inline-grid; place-items: center;
+  min-width: 26px; height: 19px; padding: 0 5px;
+  border-radius: 5px; background: var(--series-1); color: #fff;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em;
 }
-.dd-option[aria-selected="true"] .dd-box {
-  background: currentColor; border-color: currentColor;
-}
-.dd-option[aria-selected="true"] .dd-box::after { content: "✓"; color: var(--surface); font-weight: 700; }
-.dd-foot {
-  border-top: 1px solid var(--border); padding: 8px 12px;
-  font-size: 11px; color: var(--ink-muted);
-}
+.dd-option .geo-badge { background: var(--ink-muted); }
+.dd-option[aria-selected="true"] .geo-badge { background: var(--series-1); }
 
 /* --- Masthead ----------------------------------------------------------- */
 
@@ -417,3 +417,26 @@ footer.colophon {
 }
 
 .loading { padding: 60px 44px; color: var(--ink-muted); }
+
+/* --- Plain-language notes ----------------------------------------------- */
+
+.notes { display: grid; gap: 14px; }
+.note {
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--series-1);
+  border-radius: 12px; padding: 16px 20px; box-shadow: var(--shadow-1);
+}
+.note h3 { margin: 0 0 6px; font-size: 15px; letter-spacing: -0.005em; }
+.note p { margin: 0; color: var(--ink-2); font-size: 14px; max-width: 78ch; }
+
+details.technical {
+  margin-top: 22px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 12px; padding: 4px 20px;
+}
+details.technical summary {
+  cursor: pointer; padding: 13px 0; font-size: 13.5px; color: var(--ink-2);
+}
+details.technical summary:hover { color: var(--ink); }
+details.technical[open] summary { border-bottom: 1px solid var(--grid); margin-bottom: 6px; }
+details.technical .caveats li { font-size: 13px; }
+details.technical .caveats li:last-child { border-bottom: 0; }
