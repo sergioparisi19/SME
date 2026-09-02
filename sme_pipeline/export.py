@@ -95,6 +95,24 @@ FIRM_CHARTS = {
         "unit": "PC_ENT",
         "indicators": ["E_ITSPRCR2", "E_ITSPVAC2", "E_ITT2"],
     },
+    "security": {
+        "section": "security",
+        "title": "ICT security measures",
+        "unit": "PC_ENT",
+        "indicators": [
+            "E_SECMGE1", "E_SECMGE3", "E_SECMGE5",
+            "E_SECMSPSW", "E_SECMOSBU", "E_SECMDUO", "E_SECAWANY",
+        ],
+    },
+    "presence": {
+        "section": "presence",
+        "title": "Digital presence and selling online",
+        "unit": "PC_ENT",
+        "indicators": [
+            "E_WEB", "E_WEBORD", "E_SM1_ANY",
+            "E_AESELL", "E_AWSELL", "E_AWS_CMP",
+        ],
+    },
 }
 
 # NACE sections the sector view uses. Deliberately only the single-letter
@@ -181,7 +199,43 @@ INDIVIDUAL_CUTS = {
     "I0_2": {"kind": "education", "label": "Low (ISCED 0-2)"},
     "I3_4": {"kind": "education", "label": "Medium (ISCED 3-4)"},
     "I5_8": {"kind": "education", "label": "High (ISCED 5-8)"},
+    # Occupation, ordered from most to least digital.
+    "ISCO_ICT": {"kind": "occupation", "label": "ICT professionals"},
+    "ISCO0_5": {"kind": "occupation", "label": "Non-manual"},
+    "ISCO_ICTX": {"kind": "occupation", "label": "Non-ICT professionals"},
+    "ISCO6_9": {"kind": "occupation", "label": "Manual"},
+    # Degree of urbanisation, ordered city -> rural.
+    "IND_DEG1": {"kind": "place", "label": "Cities"},
+    "IND_DEG2": {"kind": "place", "label": "Towns & suburbs"},
+    "IND_DEG3": {"kind": "place", "label": "Rural areas"},
+    # Labour-force status.
+    "STUD": {"kind": "status", "label": "Students"},
+    "SAL_SELF_FAM": {"kind": "status", "label": "In work"},
+    "UNE": {"kind": "status", "label": "Unemployed"},
+    "RETIR_OTHER": {"kind": "status", "label": "Retired / inactive"},
+    # Eurostat publishes no plain male/female total - sex exists only crossed
+    # with education, so the gender gap can only be read within a level.
+    "M_I0_2": {"kind": "sex", "label": "Men · low education"},
+    "F_I0_2": {"kind": "sex", "label": "Women · low education"},
+    "M_I3_4": {"kind": "sex", "label": "Men · medium education"},
+    "F_I3_4": {"kind": "sex", "label": "Women · medium education"},
+    "M_I5_8": {"kind": "sex", "label": "Men · high education"},
+    "F_I5_8": {"kind": "sex", "label": "Women · high education"},
 }
+
+# Charts the page draws a trend line for need every year. Every other chart is
+# read at its latest year only, so shipping a decade of history for them is
+# bytes the browser downloads and never looks at.
+TRENDED = {"ai_adoption", "sector_adoption", "workforce"}
+RECENT_YEARS = 3
+
+
+def _trim_years(subset: pd.DataFrame, chart_id: str) -> pd.DataFrame:
+    if chart_id in TRENDED:
+        return subset
+    keep = sorted(subset["time"].unique())[-RECENT_YEARS:]
+    return subset[subset["time"].isin(keep)]
+
 
 FIRM_COLUMNS = ["geo", "time", "size_emp", "indicator", "value", "enterprise_count"]
 SECTOR_COLUMNS = ["geo", "time", "nace_r2", "indicator", "value", "enterprise_count"]
@@ -236,6 +290,7 @@ def build_firm_charts(df: pd.DataFrame, unit_codes: dict) -> tuple[dict, set[str
             )
 
         subset = subset.sort_values(["indicator", "geo", "time", "size_emp"])
+        subset = _trim_years(subset, chart_id)
 
         # enterprise_count is the denominator for PC_ENT and nothing else.
         # Shipping it beside a differently-based unit invites the page to
@@ -284,6 +339,7 @@ def build_sector_charts(df: pd.DataFrame, unit_codes: dict) -> tuple[dict, set[s
             )
 
         subset = subset.sort_values(["indicator", "geo", "time", "nace_r2"])
+        subset = _trim_years(subset, chart_id)
 
         weightable = bool(unit_codes[spec["unit"]]["weightable"])
         if not weightable:
@@ -326,6 +382,7 @@ def build_individual_charts(df: pd.DataFrame) -> tuple[dict, set[str]]:
             raise ValueError(f"chart {chart_id!r}: no rows survived filtering")
 
         subset = subset.sort_values(["indicator", "geo", "time"])
+        subset = _trim_years(subset, chart_id)
         charts[chart_id] = {
             "title": spec["title"],
             "section": spec["section"],
