@@ -101,21 +101,25 @@ def expand_ind_type(df):
 
 # --- Indicator naming -------------------------------------------------------
 
-def build_indicator(df):
-    """Combine `indic_is`/`indic_sbs` and `unit` into a single `indicator` column.
+def normalize_indicator(df):
+    """Rename `indic_is`/`indic_sbs` to `indicator`, keeping `unit` alongside it.
 
     The pair is what actually identifies a metric: isoc_eb_ai reports six
-    distinct measures under one indic_is code, separated only by unit.
+    distinct measures under one indic_is code, separated only by unit. They stay
+    two columns rather than one composite so each half can be filtered on its
+    own - the indicator ("uses AI") and the base population the percentage is a
+    share of (PC_ENT, PC_ENT_AI_EC, ...), which is what `unit` really encodes.
     """
     out = df.copy()
     indic_col = "indic_is" if "indic_is" in out.columns else "indic_sbs"
     if indic_col not in out.columns:
         raise NormalizeError(f"no indicator column found (columns: {list(out.columns)})")
 
-    if "unit" in out.columns:
-        out["indicator"] = out[indic_col].astype(str) + "|" + out["unit"].astype(str)
-    else:
-        out["indicator"] = out[indic_col].astype(str)
+    out = out.rename(columns={indic_col: "indicator"})
+    if "unit" not in out.columns:
+        # Nothing in the registry lacks a unit today, but a source that did
+        # would otherwise drop out of the key silently.
+        out["unit"] = pd.NA
 
     return out
 
