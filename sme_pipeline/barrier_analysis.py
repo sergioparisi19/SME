@@ -197,12 +197,17 @@ def _bootstrap(panel: pd.DataFrame, draws: int, seed: int) -> dict:
     }
 
 
-def _fit(panel: pd.DataFrame) -> tuple[dict[str, float], np.ndarray, np.ndarray]:
-    """Full model in one go - coefficients, fitted values and year effects.
+def _fit(panel: pd.DataFrame):
+    """Full model in one go - coefficients, fitted values and per-year context.
 
     The Shapley step works on residualised arrays because it refits 128 times;
     this is fitted once, directly, because the decomposition needs the
     coefficients themselves rather than a variance split.
+
+    The year effect is recovered as `fitted - X . beta` rather than by reading
+    dummy coefficients, which keeps it independent of how get_dummies happens to
+    order or drop its columns - and gives a value for any year, so a row that was
+    not in the sample can still be scored.
     """
     dummies = pd.get_dummies(panel["time"], drop_first=True).astype(float).to_numpy()
     x = panel[BARRIERS].to_numpy(dtype=float)
@@ -210,9 +215,43 @@ def _fit(panel: pd.DataFrame) -> tuple[dict[str, float], np.ndarray, np.ndarray]
     y = panel["y"].to_numpy(dtype=float)
     beta, *_ = np.linalg.lstsq(design, y, rcond=None)
     fitted = design @ beta
-    # The non-barrier part: intercept plus this row's year effect.
-    context = np.column_stack([np.ones(len(panel)), dummies]) @ beta[: 1 + dummies.shape[1]]
-    return dict(zip(BARRIERS, beta[-len(BARRIERS):])), fitted, context
+
+    context = fitted - x @ beta[-len(BARRIERS):]
+    by_year = pd.Series(context, index=panel["time"].to_numpy()).groupby(level=0).mean()
+    return dict(zip(BARRIERS, beta[-len(BARRIERS):])), fitted, context, by_year.to_dict()
+
+
+def _aggregate_targets(df: pd.DataFrame, tier: str, panel: pd.DataFrame) -> pd.DataFrame:
+    """Rows to score but never to fit: EU27, and an all-countries composite.
+
+    Neither can be fitted - an aggregate is a single row per year, not a sample -
+    but both can be read through the tier model, which is what makes the question
+    "how does the EU27 gap decompose" answerable at all.
+
+    EU27 is Eurostat's own published aggregate, weighted by how many enterprises
+    each country has. The composite is a plain mean of the countries actually in
+    the model. The two differ, and that difference is the weighting, not noise.
+    """
+    rows = df[df["nace_r2"].isna() & (df["size_emp"] == tier)]
+    years = sorted(panel["time"].unique())
+
+    eu = (rows[(rows["geo"] == "EU27_2020") & (rows["unit"] == BARRIER_UNIT)
+               & (rows["indicator"].isin(BARRIERS))]
+          .pivot_table(index="time", columns="indicator", values="value"))
+    eu_y = (rows[(rows["geo"] == "EU27_2020") & (rows["unit"] == OUTCOME_UNIT)
+                 & (rows["indicator"] == OUTCOME)]
+            .set_index("time")["value"])
+
+    frames = []
+    for year in years:
+        if year in eu.index and year in eu_y.index and eu.loc[year].notna().all():
+            frames.append({"geo": "EU27_2020", "time": year, "y": float(eu_y[year]),
+                           **{c: float(eu.loc[year, c]) for c in BARRIERS}})
+        block = panel[panel["time"] == year]
+        if len(block):
+            frames.append({"geo": "ALL_MEAN", "time": year, "y": float(block["y"].mean()),
+                           **{c: float(block[c].mean()) for c in BARRIERS}})
+    return pd.DataFrame(frames)
 
 
 def by_country(df: pd.DataFrame) -> pd.DataFrame:
@@ -224,6 +263,12 @@ def by_country(df: pd.DataFrame) -> pd.DataFrame:
     model applied to a country: the gap between a country's actual adoption and
     what the model expects of a country with average barrier levels that year,
     split into the part each barrier accounts for.
+
+    Two aggregate rows are scored the same way and marked `in_model = False`:
+    EU27_2020, Eurostat's published aggregate, and ALL_MEAN, a plain mean of the
+    countries in the model. Neither is fitted - an aggregate is one row per year,
+    not a sample - and EU27 in particular must stay out of the fit, being a
+    weighted combination of the very rows it would sit beside.
 
         expected_i    = intercept + year effect + (mean barriers) . beta
         contribution  = beta_j * (country's barrier_j - the tier mean)
@@ -237,32 +282,43 @@ def by_country(df: pd.DataFrame) -> pd.DataFrame:
         panel = _panel(df, tier)
         if len(panel) < 40:
             continue
-        beta, fitted, context = _fit(panel)
+        beta, fitted, context, context_by_year = _fit(panel)
         means = panel[BARRIERS].mean()
-        # What the model expects of an average-barrier country in that year.
-        expected = context + float((means * pd.Series(beta)).sum())
-        actual = panel["y"].to_numpy(dtype=float)
-        residual = actual - fitted
+        offset = float((means * pd.Series(beta)).sum())
 
-        for j, code in enumerate(BARRIERS):
-            deviation = panel[code].to_numpy(dtype=float) - means[code]
-            frames.append(pd.DataFrame({
-                "tier": TIER_LABELS.get(tier, tier),
-                "tier_code": tier,
-                "geo": panel["geo"].to_numpy(),
-                "year": panel["time"].to_numpy(),
-                "barrier": [SHORT_LABELS.get(code, code)] * len(panel),
-                "barrier_code": code,
-                "exposure_pct": panel[code].to_numpy(dtype=float).round(1),
-                "tier_mean_pct": round(float(means[code]), 1),
-                "deviation_pp": (deviation).round(1),
-                "coefficient": round(float(beta[code]), 4),
-                "contribution_pp": (beta[code] * deviation).round(2),
-                "actual_adoption_pct": actual.round(1),
-                "expected_adoption_pct": expected.round(1),
-                "gap_pp": (actual - expected).round(1),
-                "unexplained_pp": residual.round(2),
-            }))
+        extra = _aggregate_targets(df, tier, panel)
+        targets = [(panel, True)] + ([(extra, False)] if len(extra) else [])
+
+        for block, in_model in targets:
+            x = block[BARRIERS].to_numpy(dtype=float)
+            ctx = (context if in_model
+                   else block["time"].map(context_by_year).to_numpy(dtype=float))
+            actual = block["y"].to_numpy(dtype=float)
+            # What the model expects of an average-barrier unit in that year.
+            expected = ctx + offset
+            predicted = ctx + x @ np.array([beta[c] for c in BARRIERS])
+            residual = actual - predicted
+
+            for code in BARRIERS:
+                deviation = block[code].to_numpy(dtype=float) - means[code]
+                frames.append(pd.DataFrame({
+                    "tier": TIER_LABELS.get(tier, tier),
+                    "tier_code": tier,
+                    "geo": block["geo"].to_numpy(),
+                    "year": block["time"].to_numpy(),
+                    "in_model": in_model,
+                    "barrier": [SHORT_LABELS.get(code, code)] * len(block),
+                    "barrier_code": code,
+                    "exposure_pct": block[code].to_numpy(dtype=float).round(1),
+                    "tier_mean_pct": round(float(means[code]), 1),
+                    "deviation_pp": deviation.round(1),
+                    "coefficient": round(float(beta[code]), 4),
+                    "contribution_pp": (beta[code] * deviation).round(2),
+                    "actual_adoption_pct": actual.round(1),
+                    "expected_adoption_pct": expected.round(1),
+                    "gap_pp": (actual - expected).round(1),
+                    "unexplained_pp": residual.round(2),
+                }))
     if not frames:
         return pd.DataFrame()
     out = pd.concat(frames, ignore_index=True)
