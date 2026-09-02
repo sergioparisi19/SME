@@ -8,6 +8,7 @@ and argue with, rather than on a page where a quadrant chart would settle the
 argument for the reader.
 
     python analyse_barriers.py               # writes both CSVs to data/analysis/
+    python analyse_barriers.py --years 2025  # one survey year only
     python analyse_barriers.py --draws 1000  # tighter bootstrap intervals, slower
     python analyse_barriers.py --out-dir somewhere/
 
@@ -64,7 +65,7 @@ FIELDS = [
     "share_pct", "ci_low_pct", "ci_high_pct", "first_place_rate",
     "direction", "corr_with_adoption", "exposure_eu27_pct",
     "n_cells", "n_countries", "years",
-    "r2_years_only", "r2_with_barriers", "delta_r2",
+    "r2_years_only", "r2_with_barriers", "r2_adjusted", "delta_r2",
     "lead_share", "stability_threshold", "bootstrap_draws", "tier_published",
     "outcome_code", "outcome_unit", "exposure_unit", "generated_utc",
 ]
@@ -98,6 +99,7 @@ def rows_from(result: dict, labels: dict[str, str], draws: int | None = None) ->
                 "years": " ".join(model["years"]),
                 "r2_years_only": model["r2_years_only"],
                 "r2_with_barriers": model["r2_with_barriers"],
+                "r2_adjusted": model["r2_adjusted"],
                 "delta_r2": model["delta_r2"],
                 "lead_share": model["lead_share"],
                 "stability_threshold": result["stability_threshold"],
@@ -130,6 +132,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--draws", type=int, default=barrier_analysis.BOOTSTRAP_DRAWS)
     parser.add_argument("--seed", type=int, default=barrier_analysis.SEED)
+    parser.add_argument("--years", nargs="+", default=None,
+                        help="restrict to these survey years, e.g. --years 2025")
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT.parent)
     args = parser.parse_args()
 
@@ -138,13 +142,20 @@ def main() -> None:
     labels = json.loads((PROCESSED_DIR / "firm_level.datamap.json").read_text(encoding="utf-8"))
     names = labels["columns"]["indicator"]["codes"]
 
-    print(f"Fitting {len(barrier_analysis.TIERS)} tier models, {args.draws} bootstrap draws each...")
-    result = barrier_analysis.analyse(firm, draws=args.draws, seed=args.seed)
+    scope = " ".join(args.years) if args.years else "all years"
+    print(f"Fitting {len(barrier_analysis.TIERS)} tier models on {scope}, "
+          f"{args.draws} bootstrap draws each...")
+    result = barrier_analysis.analyse(firm, draws=args.draws, seed=args.seed,
+                                      years=args.years)
     rows = rows_from(result, names, draws=args.draws)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    summary_path = args.out_dir / "barrier_importance.csv"
-    country_path = args.out_dir / "barrier_contributions_by_country.csv"
+    # A year-restricted run writes its own files rather than overwriting the
+    # full-panel result - the two answer different questions and both are worth
+    # keeping side by side.
+    suffix = f"_{'_'.join(args.years)}" if args.years else ""
+    summary_path = args.out_dir / f"barrier_importance{suffix}.csv"
+    country_path = args.out_dir / f"barrier_contributions_by_country{suffix}.csv"
 
     # Windows locks a CSV that is open in Excel or an editor, and losing a
     # 9-second run to a file handle is a poor trade - say which file, and why.
@@ -162,7 +173,7 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(rows)
 
-    country = enrich_country(barrier_analysis.by_country(firm), result)
+    country = enrich_country(barrier_analysis.by_country(firm, years=args.years), result)
     country.to_csv(country_path, index=False, encoding="utf-8")
 
     print(f"\nWrote {len(rows)} rows to {summary_path}")

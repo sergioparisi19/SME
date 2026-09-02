@@ -83,6 +83,11 @@ STABILITY_THRESHOLD = 0.60
 BOOTSTRAP_DRAWS = 400
 SEED = 7
 
+# Seven predictors need more than a handful of rows to mean anything. A single
+# survey year leaves roughly one cell per reporting country, which is above this
+# floor but close to it - hence the gate, not a promise.
+MIN_CELLS = 20
+
 
 # The composite row is a plain mean of the modelled countries, so it needs a
 # name of its own - it is not a place.
@@ -99,9 +104,18 @@ def geo_labels() -> dict[str, str]:
     return {**codes, ALL_MEAN: ALL_MEAN_LABEL}
 
 
-def _panel(df: pd.DataFrame, tier: str) -> pd.DataFrame:
-    """One row per country-year: the seven barriers and the adoption rate."""
+def _panel(df: pd.DataFrame, tier: str, years: list[str] | None = None) -> pd.DataFrame:
+    """One row per country-year: the seven barriers and the adoption rate.
+
+    Restricting to a single year drops the panel from ~83 cells to roughly the
+    number of reporting countries. That is estimable but thin, and the year
+    dummies collapse to nothing, so the baseline becomes an intercept and the
+    reported R2 is the whole of what the barriers explain rather than what they
+    add. The stability gate is what decides whether the result survives it.
+    """
     rows = df[df["nace_r2"].isna() & (df["geo"] != "EU27_2020") & (df["size_emp"] == tier)]
+    if years:
+        rows = rows[rows["time"].isin(years)]
     outcome = (rows[(rows["indicator"] == OUTCOME) & (rows["unit"] == OUTCOME_UNIT)]
                .set_index(["geo", "time"])["value"].rename("y"))
     barriers = (rows[(rows["indicator"].isin(BARRIERS)) & (rows["unit"] == BARRIER_UNIT)]
@@ -240,7 +254,7 @@ def _fit(panel: pd.DataFrame):
     return dict(zip(BARRIERS, beta[-len(BARRIERS):])), fitted, context, by_year.to_dict()
 
 
-def _aggregate_targets(df: pd.DataFrame, tier: str, panel: pd.DataFrame) -> pd.DataFrame:
+def _aggregate_targets(df: pd.DataFrame, tier: str, panel: pd.DataFrame) -> pd.DataFrame:  # noqa: D401
     """Rows to score but never to fit: EU27, and an all-countries composite.
 
     Neither can be fitted - an aggregate is a single row per year, not a sample -
@@ -273,7 +287,8 @@ def _aggregate_targets(df: pd.DataFrame, tier: str, panel: pd.DataFrame) -> pd.D
     return pd.DataFrame(frames)
 
 
-def by_country(df: pd.DataFrame, labels: dict[str, str] | None = None) -> pd.DataFrame:
+def by_country(df: pd.DataFrame, labels: dict[str, str] | None = None,
+               years: list[str] | None = None) -> pd.DataFrame:
     """Split each country's adoption gap into per-barrier contributions.
 
     This is NOT a model per country. A country has four observations - 2021,
@@ -301,8 +316,8 @@ def by_country(df: pd.DataFrame, labels: dict[str, str] | None = None) -> pd.Dat
 
     frames = []
     for tier in TIERS:
-        panel = _panel(df, tier)
-        if len(panel) < 40:
+        panel = _panel(df, tier, years)
+        if len(panel) < MIN_CELLS:
             continue
         beta, fitted, context, context_by_year = _fit(panel)
         resid_y, resid_x, total_ss, base_rss = _prepare(panel)
@@ -366,13 +381,14 @@ def by_country(df: pd.DataFrame, labels: dict[str, str] | None = None) -> pd.Dat
     return out.sort_values(["tier_code", "country", "year", "rank_in_unit"]).reset_index(drop=True)
 
 
-def analyse(df: pd.DataFrame, draws: int = BOOTSTRAP_DRAWS, seed: int = SEED) -> dict:
+def analyse(df: pd.DataFrame, draws: int = BOOTSTRAP_DRAWS, seed: int = SEED,
+            years: list[str] | None = None) -> dict:
     """Run the decomposition for every tier, flagging which ones hold up."""
     tiers: dict[str, dict] = {}
 
     for tier in TIERS:
-        panel = _panel(df, tier)
-        if len(panel) < 40:
+        panel = _panel(df, tier, years)
+        if len(panel) < MIN_CELLS:
             continue
 
         resid_y, resid_x, total_ss, base_rss = _prepare(panel)
@@ -383,14 +399,23 @@ def analyse(df: pd.DataFrame, draws: int = BOOTSTRAP_DRAWS, seed: int = SEED) ->
         eu = _eu_exposure(df, tier)
         boot = _bootstrap(panel, draws, seed)
 
+        # Adjusted R2 is the honest statistic when the panel is short: seven
+        # predictors on ~22 rows inflate the raw figure considerably, and a
+        # single-year run is exactly that case.
+        n_obs = len(panel)
+        n_params = len(BARRIERS) + panel["time"].nunique()   # barriers + year effects
+        raw = 1 - _rss(resid_y, resid_x, tuple(range(len(BARRIERS)))) / total_ss
+        adjusted = (1 - (1 - raw) * (n_obs - 1) / (n_obs - n_params - 1)
+                    if n_obs > n_params + 1 else float("nan"))
+
         tiers[tier] = {
             "published": boot["lead_share"] >= STABILITY_THRESHOLD,
-            "n": int(len(panel)),
+            "n": int(n_obs),
             "countries": int(panel["geo"].nunique()),
             "years": sorted(panel["time"].unique().tolist()),
             "r2_years_only": round(1 - base_rss / total_ss, 3),
-            "r2_with_barriers": round(
-                1 - _rss(resid_y, resid_x, tuple(range(len(BARRIERS)))) / total_ss, 3),
+            "r2_with_barriers": round(raw, 3),
+            "r2_adjusted": round(adjusted, 3),
             "delta_r2": round(added, 3),
             "lead_share": round(boot["lead_share"], 3),
             "barriers": {
@@ -416,5 +441,6 @@ def analyse(df: pd.DataFrame, draws: int = BOOTSTRAP_DRAWS, seed: int = SEED) ->
         "exposure_unit": BARRIER_UNIT,
         "indicators": BARRIERS,
         "stability_threshold": STABILITY_THRESHOLD,
+        "years": sorted(years) if years else "all",
         "tiers": tiers,
     }
