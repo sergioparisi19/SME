@@ -10,6 +10,7 @@ FIRM_COLUMNS = [
     "size_emp",
     "nace_r2",
     "indicator",
+    "unit",
     "value",
     "enterprise_count",
     "dataset",
@@ -19,6 +20,7 @@ INDIVIDUAL_COLUMNS = [
     "geo",
     "time",
     "indicator",
+    "unit",
     "value",
     "sex",
     "age",
@@ -72,7 +74,7 @@ def build_universe(tidy_by_code):
 def _prepare_firm_rows(df, spec):
     """Normalize one firm-level dataset into the shared firm-table shape."""
     out = normalize.normalize_size_emp(df, source=spec.code)
-    out = normalize.build_indicator(out)
+    out = normalize.normalize_indicator(out)
     out["dataset"] = spec.code
 
     # The ICT surveys' "all sectors" total is a different population from the
@@ -125,7 +127,7 @@ def build_individual_table(tidy_by_code):
         if spec.code not in tidy_by_code:
             continue
 
-        prepared = normalize.build_indicator(tidy_by_code[spec.code])
+        prepared = normalize.normalize_indicator(tidy_by_code[spec.code])
         prepared = normalize.expand_ind_type(prepared)
         prepared["dataset"] = spec.code
         frames.append(normalize.ensure_columns(prepared, INDIVIDUAL_COLUMNS)[INDIVIDUAL_COLUMNS])
