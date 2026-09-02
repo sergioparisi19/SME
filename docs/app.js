@@ -758,36 +758,30 @@ function compactCount(n) {
 /**
  * Turn percentages into a number of businesses.
  *
- * Only legitimate where the unit is a share of all enterprises and a count
- * exists - the business register runs a year behind the survey, so this
- * deliberately reads the latest year that HAS counts rather than the latest
- * year overall, and reports which year that was.
+ * Strictly same-year: the count must come from the very year the rest of the
+ * page is showing. The business register often trails the survey by a year,
+ * and pairing this year's percentage with last year's business count produces
+ * a figure that looks authoritative and belongs to neither year. Where the
+ * years do not line up this returns null, and the section removes itself
+ * rather than quoting a number from a different year.
  */
 function absoluteCounts(chartId, indicator, f) {
   if (SERIES[chartId].weightable !== true) return null;
-  const years = yearsOf(chartId, { indicator }).slice().reverse();
-  for (const time of years) {
-    const recs = where(chartId, {
-      indicator, [dim().field]: f.band, time, geo: f.geos,
-    }).filter((r) => typeof r.enterprise_count === "number" && r.enterprise_count > 0);
-    if (!recs.length) continue;
-    const total = recs.reduce((a, r) => a + r.enterprise_count, 0);
-    const doing = recs.reduce((a, r) => a + r.enterprise_count * r.value / 100, 0);
-    return { time, total, doing, missing: total - doing, n: recs.length };
-  }
-  return null;
+  const time = latestYear(chartId, { indicator });
+  if (!time) return null;
+  const recs = where(chartId, {
+    indicator, [dim().field]: f.band, time, geo: f.geos,
+  }).filter((r) => typeof r.enterprise_count === "number" && r.enterprise_count > 0);
+  if (!recs.length) return null;
+  const total = recs.reduce((a, r) => a + r.enterprise_count, 0);
+  const doing = recs.reduce((a, r) => a + r.enterprise_count * r.value / 100, 0);
+  return { time, total, doing, missing: total - doing, n: recs.length };
 }
 
 function countsCard(root, { chartId, indicator, title, note }) {
   const f = facets()[0];
   const c = absoluteCounts(chartId, indicator, f);
-
-  if (!c) {
-    card(root, { title,
-      empty: "Absolute numbers need a count of businesses, which Eurostat's business register publishes only for 2021 to 2024 and only for shares of all enterprises. This selection has none.",
-    });
-    return;
-  }
+  if (!c) return;   // the section is filtered out before this, but stay safe
 
   const tiles = el("div", { class: "tiles" });
   const tile = (k, v, sub, accent) => {
@@ -804,7 +798,7 @@ function countsCard(root, { chartId, indicator, title, note }) {
   root.appendChild(tiles);
 
   root.appendChild(el("p", { class: "card-warn", text:
-    `${note} Counts come from the business register, percentages from the ICT survey — two overlapping but not identical populations — so these are estimates, not exact counts. ${c.time} is the most recent year with a register figure; the percentages elsewhere on this page run a year ahead of it.` }));
+    `${note} Counts come from the business register and percentages from the ICT survey — two overlapping but not identical populations — so these are estimates, not exact counts. Both figures are for ${c.time}; where the register has not caught up with the survey this section is not shown at all.` }));
 }
 
 /* --- generic section renderers ------------------------------------------ */
@@ -1132,8 +1126,11 @@ const PART_ORDER = [
   "Who can do it",
   "Reading it",
 ];
-const orderedSections = (sections) =>
-  [...sections].sort((a, b) => PART_ORDER.indexOf(a.part) - PART_ORDER.indexOf(b.part));
+const orderedSections = (sections) => [...sections]
+  // A section whose data does not exist for this selection is removed, not
+  // rendered as an empty shell - a permanent "no data" panel is just clutter.
+  .filter((spec) => !spec.available || spec.available())
+  .sort((a, b) => PART_ORDER.indexOf(a.part) - PART_ORDER.indexOf(b.part));
 
 const VIEWS = {
   firm: {
@@ -1150,6 +1147,7 @@ const VIEWS = {
             note: "Every chart in this view uses the same comparison, so it stays consistent as you scroll." });
         } },
       { id: "how-many", part: "The scale", nav: "How many firms", h2: "How many businesses is that?",
+        available: () => absoluteCounts("ai_adoption", "E_AI_TANY", facets()[0]) !== null,
         deck: "A percentage is arguable; a number of companies is harder to wave away. This is the same figure expressed as businesses.",
         render: (r) => countsCard(r, { chartId: "ai_adoption", indicator: "E_AI_TANY",
           title: "Businesses of this size",
