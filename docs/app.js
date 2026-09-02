@@ -46,13 +46,13 @@ const state = {
     band: "SMALL_10_49",
     compareMode: "band",          // band | geo
     compareBand: "LARGE_GE250",
-    compareGeo: "DE",
+    compareGeos: ["DE"],
   },
   individual: {
     band: "Y25_34",
     compareMode: "band",
     compareBand: "Y55_64",
-    compareGeo: "DE",
+    compareGeos: ["DE"],
   },
 };
 
@@ -147,6 +147,13 @@ const DIMENSIONS = {
 const dim = () => DIMENSIONS[state.view];
 const sel = () => state[state.view];
 
+/* Eurostat's geo codes are ISO 3166 alpha-2 apart from Greece, which it calls
+ * EL. Badges show the code rather than a flag emoji on purpose: Windows ships
+ * no flag glyphs, so an emoji flag renders there as the bare letter pair
+ * anyway, while a badge renders identically on every platform. */
+const GEO_BADGE = { EU27_2020: "EU", EL: "GR" };
+const geoBadge = (code) => GEO_BADGE[code] ?? code;
+
 /**
  * The one or two slices every chart draws.
  *
@@ -165,8 +172,8 @@ function facets() {
   const b = byBand
     ? { geos: state.geos, band: s.compareBand, slot: SERIES_SLOTS[1],
         label: d.labelOf(s.compareBand) }
-    : { geos: [s.compareGeo], band: s.band, slot: SERIES_SLOTS[1],
-        label: label("geo", s.compareGeo) };
+    : { geos: s.compareGeos, band: s.band, slot: SERIES_SLOTS[1],
+        label: geosLabel(s.compareGeos) };
 
   // Same slice twice is one series, not two identical bars.
   const same = a.band === b.band
@@ -174,9 +181,16 @@ function facets() {
   return same ? [a] : [a, b];
 }
 
-/** How a country selection names itself: one country, or a count of them. */
-const geosLabel = (geos) =>
-  (geos.length === 1 ? label("geo", geos[0]) : `${geos.length} countries (average)`);
+/**
+ * How a country selection names itself. A bare count is ambiguous the moment
+ * both sides of a comparison hold the same number of countries, so small groups
+ * name their members and only larger ones fall back to a count.
+ */
+function geosLabel(geos) {
+  if (geos.length === 1) return label("geo", geos[0]);
+  if (geos.length <= 4) return geos.map(geoBadge).join(" · ");
+  return `${geos.length} countries`;
+}
 
 /** What stays fixed across the comparison - it belongs in the title, not the legend. */
 function heldConstant() {
@@ -282,9 +296,6 @@ const shortGeo = (code) => (code === REF_GEO ? "EU27" : label("geo", code));
  * EL. The badge shows the code rather than a flag emoji on purpose: Windows
  * ships no flag glyphs, so an emoji flag renders there as the bare letter pair
  * anyway, and a badge renders identically on every platform. */
-const GEO_BADGE = { EU27_2020: "EU", EL: "GR" };
-const geoBadge = (code) => GEO_BADGE[code] ?? code;
-
 const SVG_TAGS = new Set([
   "svg", "g", "rect", "line", "path", "text", "circle", "polyline",
   "defs", "linearGradient", "stop", "title",
@@ -674,12 +685,19 @@ function headlineTiles(root, { chartId, indicator }) {
     `Eurostat's published aggregate · ${dim().labelOf(sel().band)}`));
   root.appendChild(tiles);
 
-  const stat = facetStat(chartId, indicator, fs[0], year, wA);
-  if (state.geos.length > 1) {
-    root.appendChild(el("p", { class: "card-warn", text: stat?.weighted
-      ? `${state.geos.length} countries combined the way Eurostat builds EU27 — weighted by how many enterprises each country has, not a plain average of the countries.`
-      : `${state.geos.length} countries combined as a plain average, each country counting equally. No enterprise counts are available for this measure or year, so they cannot be weighted the way EU27 is.` }));
-  }
+  // Either side of the comparison can be a group of countries, and each side
+  // decides its own weighting, so the note is built per side rather than
+  // assuming the primary selection speaks for both.
+  // Either side can be a group, and each decides its own weighting - but when
+  // both land on the same method, saying so twice is noise.
+  const groups = fs.filter((f) => f.geos.length > 1);
+  const messages = new Set(groups.map((f) => {
+    const w = weightingMode(chartId, indicator, f, [year]);
+    return facetStat(chartId, indicator, f, year, w)?.weighted
+      ? "Countries are combined the way Eurostat builds EU27 — weighted by how many enterprises each has, not a plain average of the countries."
+      : "Countries are combined as a plain average, each counting equally. No enterprise counts exist for this measure or year, so they cannot be weighted the way EU27 is.";
+  }));
+  messages.forEach((text) => root.appendChild(el("p", { class: "card-warn", text })));
 }
 
 function trendCard(root, { chartId, indicator, title, note }) {
@@ -723,8 +741,9 @@ function rankingCard(root, { chartId, indicator, title, note }) {
     .map((r) => ({
       code: r.geo, label: shortGeo(r.geo), value: r.value,
       highlight: state.geos.includes(r.geo)
-        || (s.compareMode === "geo" && r.geo === s.compareGeo),
-      alt: s.compareMode === "geo" && r.geo === s.compareGeo && !state.geos.includes(r.geo),
+        || (s.compareMode === "geo" && s.compareGeos.includes(r.geo)),
+      alt: s.compareMode === "geo" && s.compareGeos.includes(r.geo)
+        && !state.geos.includes(r.geo),
       reference: r.geo === REF_GEO,
     }))
     .sort((a, b) => b.value - a.value);
@@ -964,7 +983,7 @@ const VIEWS = {
  * A searchable single-select. A native <select> over 34 countries cannot show
  * the colour a country carries in the charts, and cannot be typed into.
  */
-function countryPicker(host, { options, selected, onToggle }) {
+function countryPicker(host, { options, selected, onToggle, hint }) {
   host.innerHTML = "";
   const button = el("button", {
     class: "dd-button", type: "button", id: "dd-geo-button",
@@ -998,7 +1017,7 @@ function countryPicker(host, { options, selected, onToggle }) {
       ? label("geo", picked[0])
       : `${picked.length} countries`;
     foot.textContent = picked.length === 1
-      ? "Pick more to see their combined average."
+      ? hint
       : `${picked.length} selected · combined into one averaged series.`;
   }
 
@@ -1006,7 +1025,7 @@ function countryPicker(host, { options, selected, onToggle }) {
     const q = search.value.trim().toLowerCase();
     const picked = selected();
     list.innerHTML = "";
-    options
+    options()
       .filter((code) => !q || label("geo", code).toLowerCase().includes(q)
         || geoBadge(code).toLowerCase().startsWith(q))
       // Selected countries lead the list, so a shared link shows its selection
@@ -1076,18 +1095,19 @@ function renderAll() {
   // The comparison list is either the other bands or the other countries -
   // whichever dimension the reader chose to vary.
   const cmpSel = document.getElementById("compare-select");
-  cmpSel.innerHTML = "";
-  if (s.compareMode === "band") {
+  const cmpPick = document.getElementById("dd-compare");
+  const byBand = s.compareMode === "band";
+  cmpSel.hidden = !byBand;
+  cmpPick.hidden = byBand;
+  if (byBand) {
+    cmpSel.innerHTML = "";
     d.options.forEach((code) => cmpSel.appendChild(
       el("option", { value: code, text: d.labelOf(code) })));
     cmpSel.value = s.compareBand;
-  } else {
-    geoOptions().forEach((code) => cmpSel.appendChild(
-      el("option", { value: code, text: label("geo", code) })));
-    cmpSel.value = s.compareGeo;
   }
 
   geoPicker?.paint();
+  comparePicker?.paint();
 
   const host = document.getElementById("sections");
   host.innerHTML = "";
@@ -1134,25 +1154,42 @@ function observeSections() {
 /* --- controls ----------------------------------------------------------- */
 
 let geoPicker = null;
+let comparePicker = null;
 
 const geoOptions = () => [...new Set(rows("ai_adoption").map((r) => r.geo))]
   .filter((g) => g !== REF_GEO)
   .sort((a, b) => label("geo", a).localeCompare(label("geo", b)));
 
+/** Toggle a code in a list, refusing to empty it - a side with no country
+ *  would leave the chart with nothing to draw. */
+function toggleIn(list, code) {
+  const i = list.indexOf(code);
+  if (i >= 0) {
+    if (list.length === 1) return;
+    list.splice(i, 1);
+  } else {
+    list.push(code);
+  }
+  commit();
+}
+
 function buildControls() {
   geoPicker = countryPicker(document.getElementById("dd-geo"), {
-    options: geoOptions(),
+    // When the comparison is itself a set of countries, a country can only sit
+    // on one side of it; offering it on both invites a group to be compared
+    // against a group that partly contains it.
+    options: () => geoOptions().filter((g) =>
+      sel().compareMode !== "geo" || !sel().compareGeos.includes(g)),
     selected: () => state.geos,
-    onToggle: (code) => {
-      const i = state.geos.indexOf(code);
-      if (i >= 0) {
-        if (state.geos.length === 1) return;   // never leave the page with none
-        state.geos.splice(i, 1);
-      } else {
-        state.geos.push(code);
-      }
-      commit();
-    },
+    hint: "Pick more to see their combined average.",
+    onToggle: (code) => toggleIn(state.geos, code),
+  });
+
+  comparePicker = countryPicker(document.getElementById("dd-compare"), {
+    options: () => geoOptions().filter((g) => !state.geos.includes(g)),
+    selected: () => sel().compareGeos,
+    hint: "Pick more to compare against their combined average.",
+    onToggle: (code) => toggleIn(sel().compareGeos, code),
   });
 
   document.getElementById("primary-select").addEventListener("change", (e) => {
@@ -1162,8 +1199,7 @@ function buildControls() {
     sel().compareMode = e.target.value; commit();
   });
   document.getElementById("compare-select").addEventListener("change", (e) => {
-    if (sel().compareMode === "band") sel().compareBand = e.target.value;
-    else sel().compareGeo = e.target.value;
+    sel().compareBand = e.target.value;
     commit();
   });
 
@@ -1194,7 +1230,7 @@ function syncUrl() {
   params.set("geo", state.geos.join(","));
   params.set("band", s.band);
   params.set("by", s.compareMode);
-  params.set("vs", s.compareMode === "band" ? s.compareBand : s.compareGeo);
+  params.set("vs", s.compareMode === "band" ? s.compareBand : s.compareGeos.join(","));
   history.replaceState(null, "", `?${params}`);
 }
 
@@ -1209,7 +1245,11 @@ function readUrl() {
   if (p.get("by") === "band" || p.get("by") === "geo") s.compareMode = p.get("by");
   const vs = p.get("vs");
   if (s.compareMode === "band" && opts.includes(vs)) s.compareBand = vs;
-  if (s.compareMode === "geo" && vs && LABELS.geo[vs] && vs !== REF_GEO) s.compareGeo = vs;
+  if (s.compareMode === "geo" && vs) {
+    const list = vs.split(",").filter((g) => LABELS.geo[g] && g !== REF_GEO
+      && !state.geos.includes(g));
+    if (list.length) s.compareGeos = list;
+  }
 }
 
 /* --- boot --------------------------------------------------------------- */
