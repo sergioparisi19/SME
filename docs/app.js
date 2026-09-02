@@ -30,6 +30,26 @@ const SIZE_ORDER = ["SMALL_10_49", "MEDIUM_50_249", "LARGE_GE250", "SME_10_249",
 const AGE_ORDER = ["IND_TOTAL", "Y16_24", "Y25_34", "Y35_44", "Y45_54", "Y55_64", "Y65_74"];
 const EDU_ORDER = ["I0_2", "I3_4", "I5_8"];
 
+/* NACE sections, at one level so they never contain one another. Eurostat's own
+ * labels are full legal definitions ("Wholesale and retail trade; repair of
+ * motor vehicles and motorcycles"), which no control or axis can carry, so each
+ * gets a short name for display. The full wording stays in the tooltips. */
+const SECTIONS = ["C", "D", "E", "F", "G", "H", "I", "J", "L", "M", "N"];
+const SECTOR_SHORT = {
+  C: "Manufacturing",
+  D: "Energy",
+  E: "Water & waste",
+  F: "Construction",
+  G: "Wholesale & retail",
+  H: "Transport & storage",
+  I: "Accommodation & food",
+  J: "Information & communication",
+  L: "Real estate",
+  M: "Professional & technical",
+  N: "Admin & support",
+};
+const sectorLabel = (code) => SECTOR_SHORT[code] ?? label("nace_r2", code);
+
 /* Which band contains which. Used to warn when the selected pair overlaps -
  * SME_10_249 against SMALL_10_49 is not a comparison, it is a part against its
  * whole, and the same is true of IND_TOTAL against any single age band. */
@@ -46,6 +66,12 @@ const state = {
     band: "SMALL_10_49",
     compareMode: "band",          // band | geo
     compareBand: "LARGE_GE250",
+    compareGeos: ["DE"],
+  },
+  sector: {
+    band: "C",
+    compareMode: "band",
+    compareBand: "J",
     compareGeos: ["DE"],
   },
   individual: {
@@ -136,6 +162,11 @@ const DIMENSIONS = {
     control: "Size band", field: "size_emp",
     options: SIZE_ORDER, labelOf: bandLabel,
     clean: "10–49, 50–249 and 250+",
+  },
+  sector: {
+    control: "Sector", field: "nace_r2",
+    options: SECTIONS, labelOf: sectorLabel,
+    clean: "any two sectors",
   },
   individual: {
     control: "Age band", field: "ind_type",
@@ -804,6 +835,41 @@ function comparisonCard(root, chartId, { title, note, indicators }) {
   });
 }
 
+/**
+ * Every value of the breakdown, ranked, for the current country selection.
+ *
+ * Sectors are nominal - no natural order - so this deliberately does NOT use
+ * the ordinal ramp the age bands get. One series, one colour, with the selected
+ * sectors lifted out of the field.
+ */
+function breakdownRankCard(root, { chartId, indicator, title, note }) {
+  const d = dim();
+  const unitNote = unitNoteFor(SERIES[chartId].unit);
+  const year = latestYear(chartId, { indicator });
+  const fs = facets();
+  const picked = fs.map((f) => f.band);
+
+  const build = () => d.options.map((code) => {
+    const f = { geos: state.geos, band: code };
+    return {
+      code, label: d.labelOf(code),
+      value: facetValue(chartId, indicator, f, year,
+        weightingMode(chartId, indicator, f, [year])),
+      highlight: picked.includes(code),
+      alt: picked.indexOf(code) === 1,
+    };
+  }).filter((x) => x.value !== null).sort((a, b) => b.value - a.value);
+
+  card(root, {
+    title: `${title} — ${geosLabel(state.geos)}, ${year}`,
+    note,
+    draw: (c) => rankedBars(c, build(), { unitNote }),
+    table: () => ({
+      columns: [d.control, "%"], rows: build().map((x) => [x.label, fmt(x.value)]),
+    }),
+  });
+}
+
 function ordinalCard(root, { chartId, indicator, options, title, note, kindLabel }) {
   const d = dim();
   const unitNote = unitNoteFor(SERIES[chartId].unit);
@@ -928,6 +994,56 @@ const VIEWS = {
         render: (r) => comparisonCard(r, "skills", {
           title: "ICT skills inside the firm",
           note: "Recruitment difficulty is the constraint most often reported alongside a lack of AI expertise." }) },
+      HOW_TO_READ,
+    ],
+  },
+
+  sector: {
+    headline: "AI adoption is six times higher in some industries than others",
+    standfirst: "The same Eurostat enterprise survey, read by industry instead of by size. Pick a sector, then compare it against another sector or against another country.",
+    unitKey: "firm_level",
+    // Sector and size are never crossed in the source, so this view cannot
+    // carry an SME cut and must not imply one.
+    unitNote: "Sector figures cover every enterprise with 10 or more employees. Eurostat does not break sector down by company size, so there is no small-firm cut here — that lives in the Companies view.",
+    sections: [
+      { id: "gap", nav: "The gap", h2: "The gap, in one number",
+        deck: "The EU27 figure is Eurostat's own published aggregate for this sector, not an average of what you selected.",
+        render: (r) => {
+          headlineTiles(r, { chartId: "sector_adoption", indicator: "E_AI_TANY" });
+          trendCard(r, { chartId: "sector_adoption", indicator: "E_AI_TANY",
+            title: "AI adoption over time",
+            note: "Every chart in this view uses the same comparison, so it stays consistent as you scroll." });
+        } },
+      { id: "all-sectors", nav: "Every sector ranked", h2: "Where the divide actually sits",
+        deck: "Every sector the survey reports for this selection, at once. Not all eleven are published for every country — Energy and Water are missing in many. Sectors have no natural order, so this is a single-colour ranking rather than the graded ramp the age bands get.",
+        render: (r) => breakdownRankCard(r, { chartId: "sector_adoption", indicator: "E_AI_TANY",
+          title: "AI adoption by sector",
+          note: "The sectors you selected are emphasised; the rest stay as context." }) },
+      { id: "by-country", nav: "By country", h2: "The same sector across Europe",
+        deck: "How far your selected sector varies between countries.",
+        render: (r) => rankingCard(r, { chartId: "sector_adoption", indicator: "E_AI_TANY",
+          title: "AI adoption by country",
+          note: "Your selection and the EU27 aggregate are emphasised; the rest stay as context." }) },
+      { id: "purposes", nav: "What AI is used for", h2: "What AI actually gets used for",
+        deck: "The purposes firms report differ as sharply by industry as they do by size.",
+        render: (r) => comparisonCard(r, "sector_purposes", {
+          title: "What AI gets used for",
+          note: "All shares are of the same group — every company in the sector — so the bars are directly comparable. A firm using AI for three purposes appears in three rows." }) },
+      { id: "technologies", nav: "Which technologies", h2: "Which technologies they actually run",
+        deck: "Adoption headlines hide what is underneath: text mining and machine learning behave nothing like autonomous robots.",
+        render: (r) => comparisonCard(r, "sector_tech", {
+          title: "AI technologies in use",
+          note: "Shares of every company in the sector. A firm running three technologies appears in three rows." }) },
+      { id: "barriers", nav: "Why firms stay out", h2: "Why firms stay out",
+        deck: "Asked of the firms that considered AI and decided against it.",
+        render: (r) => comparisonCard(r, "sector_barriers", {
+          title: "Why enterprises do not adopt AI",
+          note: "Shares of the companies that considered AI — not of all companies, which is the group every other chart here counts. Reasons are not exclusive." }) },
+      { id: "skills", nav: "ICT skills", h2: "The skills constraint",
+        deck: "Whether the sector employs ICT specialists at all, and whether it trains its own people.",
+        render: (r) => comparisonCard(r, "sector_skills", {
+          title: "ICT skills inside the firm",
+          note: "Shares of every company in the sector." }) },
       HOW_TO_READ,
     ],
   },
@@ -1079,7 +1195,8 @@ function renderAll() {
   const banner = document.getElementById("unit-banner");
   banner.innerHTML = "";
   banner.appendChild(el("strong", { text: "Unit of observation:" }));
-  banner.appendChild(document.createTextNode(` ${META.tables[view.unitKey].unit_of_observation}`));
+  banner.appendChild(document.createTextNode(
+    ` ${view.unitNote ?? META.tables[view.unitKey].unit_of_observation}`));
 
   document.getElementById("lbl-primary").textContent = d.control;
   document.getElementById("opt-mode-band").textContent = d.control;

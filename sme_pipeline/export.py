@@ -97,6 +97,61 @@ FIRM_CHARTS = {
     },
 }
 
+# NACE sections the sector view uses. Deliberately only the single-letter
+# sections: the source also carries aggregates (C19-C23), divisions (J61) and
+# bespoke groupings (ICT, G45-S951_X_K) that overlap each other, so charting
+# the full code list together would double-count. These eleven sit at one level.
+SECTIONS = ["C", "D", "E", "F", "G", "H", "I", "J", "L", "M", "N"]
+
+# Sector rows exist only for all enterprises with 10+ employees - Eurostat does
+# not cross sector with size class - so this view can never carry an SME cut.
+SECTOR_SIZE = "ALL_GE10"
+
+SECTOR_CHARTS = {
+    "sector_adoption": {
+        "section": "gap",
+        "title": "Enterprises using at least one AI technology, by sector",
+        "unit": "PC_ENT",
+        "indicators": ["E_AI_TANY"],
+    },
+    "sector_purposes": {
+        "section": "purposes",
+        "title": "What AI is used for, by sector",
+        "unit": "PC_ENT",
+        "indicators": [
+            "E_AI_PMS", "E_AI_PPP", "E_AI_PBAM", "E_AI_PLOG",
+            "E_AI_PITS", "E_AI_PFIN", "E_AI_PRDI",
+        ],
+    },
+    "sector_tech": {
+        "section": "tech",
+        "title": "Which AI technologies, by sector",
+        "unit": "PC_ENT",
+        "indicators": [
+            "E_AI_TML", "E_AI_TTM", "E_AI_TNLG", "E_AI_TPA",
+            "E_AI_TIR", "E_AI_TSR", "E_AI_TAR", "E_AI_TPVSG",
+        ],
+    },
+    "sector_barriers": {
+        "section": "barriers",
+        "title": "Why enterprises do not use AI, by sector",
+        # Same reasoning as the size-class barriers chart: as a share of all
+        # enterprises a barrier reads as a handful of percent, because most
+        # firms never considered AI and so answered nothing.
+        "unit": "PC_ENT_AI_EC",
+        "indicators": [
+            "E_AI_BCST", "E_AI_BLE", "E_AI_BDDT", "E_AI_BLEG",
+            "E_AI_BCDP", "E_AI_BINC", "E_AI_BNU",
+        ],
+    },
+    "sector_skills": {
+        "section": "skills",
+        "title": "ICT skills inside the firm, by sector",
+        "unit": "PC_ENT",
+        "indicators": ["E_ITSP2", "E_ITT2", "E_ITSPT2"],
+    },
+}
+
 INDIVIDUAL_CHARTS = {
     "workforce": {
         "section": "skills",
@@ -129,6 +184,7 @@ INDIVIDUAL_CUTS = {
 }
 
 FIRM_COLUMNS = ["geo", "time", "size_emp", "indicator", "value", "enterprise_count"]
+SECTOR_COLUMNS = ["geo", "time", "nace_r2", "indicator", "value", "enterprise_count"]
 INDIVIDUAL_COLUMNS = ["geo", "time", "indicator", "ind_type", "value"]
 
 
@@ -205,6 +261,50 @@ def build_firm_charts(df: pd.DataFrame, unit_codes: dict) -> tuple[dict, set[str
     return charts, used_indicators
 
 
+def build_sector_charts(df: pd.DataFrame, unit_codes: dict) -> tuple[dict, set[str]]:
+    charts: dict[str, dict] = {}
+    used_indicators: set[str] = set()
+
+    for chart_id, spec in SECTOR_CHARTS.items():
+        _check_codes(df, "indicator", spec["indicators"], chart_id)
+        _check_codes(df, "unit", [spec["unit"]], chart_id)
+        _check_codes(df, "nace_r2", SECTIONS, chart_id)
+
+        subset = df[
+            (df["indicator"].isin(spec["indicators"]))
+            & (df["unit"] == spec["unit"])
+            & (df["nace_r2"].isin(SECTIONS))
+            & (df["size_emp"] == SECTOR_SIZE)
+        ]
+
+        if subset.empty:
+            raise ValueError(
+                f"chart {chart_id!r}: no rows survived filtering "
+                f"(unit={spec['unit']}, indicators={spec['indicators']})"
+            )
+
+        subset = subset.sort_values(["indicator", "geo", "time", "nace_r2"])
+
+        weightable = bool(unit_codes[spec["unit"]]["weightable"])
+        if not weightable:
+            subset = subset.assign(enterprise_count=None)
+
+        charts[chart_id] = {
+            "title": spec["title"],
+            "section": spec["section"],
+            "unit": spec["unit"],
+            "base": unit_codes[spec["unit"]]["base"],
+            "weightable": weightable,
+            "table": "firm_level",
+            "indicators": spec["indicators"],
+            "columns": SECTOR_COLUMNS,
+            "rows": _rows(subset, SECTOR_COLUMNS),
+        }
+        used_indicators.update(spec["indicators"])
+
+    return charts, used_indicators
+
+
 def build_individual_charts(df: pd.DataFrame) -> tuple[dict, set[str]]:
     charts: dict[str, dict] = {}
     used_indicators: set[str] = set()
@@ -264,7 +364,7 @@ def build_labels(datamaps: dict[str, dict], used: dict[str, set[str]]) -> dict:
         "unit": {
             **{
                 k: v for k, v in firm["unit"]["codes"].items()
-                if k in {s["unit"] for s in FIRM_CHARTS.values()}
+                if k in {s["unit"] for s in (*FIRM_CHARTS.values(), *SECTOR_CHARTS.values())}
             },
             **{
                 k: v for k, v in individual["unit"]["codes"].items()
@@ -272,6 +372,7 @@ def build_labels(datamaps: dict[str, dict], used: dict[str, set[str]]) -> dict:
             },
         },
         "ind_type": INDIVIDUAL_CUTS,
+        "nace_r2": {k: v for k, v in firm["nace_r2"]["codes"].items() if k in SECTIONS},
     }
 
 
@@ -307,15 +408,15 @@ def export(out_dir: Path = SITE_DATA_DIR) -> dict[str, int]:
     firm = pd.read_parquet(PROCESSED_DIR / "firm_level.parquet")
     individual = pd.read_parquet(PROCESSED_DIR / "individual_level.parquet")
 
-    firm_charts, firm_used = build_firm_charts(
-        firm, datamaps["firm_level"]["columns"]["unit"]["codes"]
-    )
+    unit_codes = datamaps["firm_level"]["columns"]["unit"]["codes"]
+    firm_charts, firm_used = build_firm_charts(firm, unit_codes)
+    sector_charts, sector_used = build_sector_charts(firm, unit_codes)
     individual_charts, individual_used = build_individual_charts(individual)
 
     payloads = {
-        "series.json": {**firm_charts, **individual_charts},
+        "series.json": {**firm_charts, **sector_charts, **individual_charts},
         "labels.json": build_labels(
-            datamaps, {"firm": firm_used, "individual": individual_used}
+            datamaps, {"firm": firm_used | sector_used, "individual": individual_used}
         ),
         "meta.json": build_meta(datamaps),
     }
