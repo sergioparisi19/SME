@@ -41,10 +41,15 @@ Columns, one row per size tier and barrier, ranked within tier:
     ci_low_pct, ci_high_pct               90% bootstrap interval, resampling
                                           whole countries
     first_place_rate                      how often it ranked first across draws
-    direction                             "against adoption" is a barrier acting
-                                          like one; "with adoption" is a
-                                          composition effect and not a driver
-    corr_with_adoption                    the raw correlation behind that
+    direction_in_model, coefficient       the barrier's sign once the other six
+                                          and the year are held constant - the
+                                          model the share comes from
+    direction_marginal, corr_with_adoption
+                                          the sign one barrier at a time. These
+                                          two can disagree, and in 9 of 21 rows
+                                          they do: a barrier can correlate with
+                                          adoption on its own and work against
+                                          it once the others are controlled
     exposure_eu27_pct                     how widely it is cited EU-wide
     n_cells, n_countries, delta_r2        what the model was fitted on, and how
                                           much it explains beyond year effects
@@ -69,7 +74,8 @@ DEFAULT_OUT = PROJECT_ROOT / "data" / "analysis" / "barrier_importance.csv"
 FIELDS = [
     "tier", "tier_code", "rank", "barrier", "barrier_full", "barrier_code",
     "share_pct", "ci_low_pct", "ci_high_pct", "first_place_rate",
-    "direction", "corr_with_adoption", "exposure_eu27_pct",
+    "direction_in_model", "coefficient", "direction_marginal", "corr_with_adoption",
+    "exposure_eu27_pct",
     "n_cells", "n_countries", "years",
     "r2_years_only", "r2_with_barriers", "r2_adjusted", "delta_r2",
     "lead_share", "stability_threshold", "bootstrap_draws", "tier_published",
@@ -97,7 +103,11 @@ def rows_from(result: dict, labels: dict[str, str], draws: int | None = None) ->
                 "ci_low_pct": interval[0],
                 "ci_high_pct": interval[1],
                 "first_place_rate": b["first_place"],
-                "direction": "against adoption" if b["sign"] == -1 else "with adoption",
+                "direction_in_model": ("against adoption" if b["sign_in_model"] == -1
+                                       else "with adoption"),
+                "coefficient": b["coefficient"],
+                "direction_marginal": ("against adoption" if b["sign"] == -1
+                                       else "with adoption"),
                 "corr_with_adoption": b["corr"],
                 "exposure_eu27_pct": b.get("exposure_eu27"),
                 "n_cells": model["n"],

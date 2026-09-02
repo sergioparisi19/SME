@@ -414,6 +414,7 @@ def analyse(df: pd.DataFrame, draws: int = BOOTSTRAP_DRAWS, seed: int = SEED,
             continue
         corr = panel[BARRIERS].corrwith(panel["y"])
         eu = _eu_exposure(df, tier)
+        beta, *_ = _fit(panel)
         boot = _bootstrap(panel, draws, seed)
 
         # Adjusted R2 is the honest statistic when the panel is short: seven
@@ -440,11 +441,20 @@ def analyse(df: pd.DataFrame, draws: int = BOOTSTRAP_DRAWS, seed: int = SEED,
                     "share": round(100.0 * value / added, 1),
                     "interval": boot["interval"].get(code),
                     "first_place": round(boot["first_place"].get(code, 0.0), 3),
-                    # -1 where the barrier moves against adoption, as a barrier
-                    # should. +1 marks the composition effect: more firms citing
-                    # it where adoption is HIGHER, which is not a driver.
+                    # Two directions, because they can disagree and one
+                    # column would hide it. `corr` is the raw one-at-a-time
+                    # correlation; `coefficient` holds the other six barriers
+                    # and the year fixed. Where predictors are correlated the
+                    # marginal and partial signs can genuinely differ - legal
+                    # uncertainty correlates positively with adoption on its own
+                    # (richer countries have both), but negatively once the rest
+                    # is held constant. The Shapley share beside these comes
+                    # from the multivariate model, so `coefficient` is the one
+                    # that belongs with it.
                     "sign": -1 if corr[code] < 0 else 1,
                     "corr": round(float(corr[code]), 2),
+                    "coefficient": round(float(beta[code]), 4),
+                    "sign_in_model": -1 if beta[code] < 0 else 1,
                     "exposure_eu27": eu.get(code),
                 }
                 for code, value in contributions.items()
