@@ -298,6 +298,11 @@ section > .deck { color: var(--ink-2); margin: 0 0 20px; max-width: 66ch; }
 .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .card-title { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.005em; }
 .card-note { font-size: 12px; color: var(--ink-muted); margin: 6px 0 16px; max-width: 82ch; line-height: 1.5; }
+.card-empty {
+  margin: 6px 0 10px; padding: 22px; border-radius: 10px;
+  background: var(--sunken); border: 1px dashed var(--axis);
+  color: var(--ink-2); font-size: 13.5px; text-align: center; max-width: 72ch;
+}
 .card-warn {
   margin: 0 0 14px; padding: 9px 12px; border-radius: 9px;
   background: var(--sunken); border: 1px solid var(--border);
@@ -328,6 +333,9 @@ section > .deck { color: var(--ink-2); margin: 0 0 20px; max-width: 66ch; }
 }
 .tile .k { font-size: 11.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-muted); }
 .tile .v { font-size: 40px; line-height: 1.05; margin: 12px 0 5px; letter-spacing: -0.028em; }
+/* "Not published" is a sentence, not a figure - at hero size it wraps and
+   shouts louder than the numbers it sits beside. */
+.tile .v.v-text { font-size: 21px; line-height: 1.2; letter-spacing: -0.01em; color: var(--ink-2); }
 .tile .sub { font-size: 12.5px; color: var(--ink-2); }
 .tile.accent .v { color: var(--series-1); }
 .tile.compare .v { color: var(--series-2); }
@@ -348,6 +356,15 @@ section > .deck { color: var(--ink-2); margin: 0 0 20px; max-width: 66ch; }
 }
 .cat-label.clipped:hover { fill: var(--ink); text-decoration-color: var(--ink-muted); }
 .value-label { fill: var(--ink-2); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* A withheld figure is marked, not hidden: a short rule where the bar would
+   start, and the reason on hover. Muted and italic so it never reads as data. */
+.cat-label.missing { fill: var(--ink-muted); font-style: italic; }
+.value-label.missing {
+  fill: var(--ink-muted); font-weight: 400; font-style: italic;
+  font-size: 10.5px; cursor: help;
+}
+.missing-rule { stroke: var(--axis); stroke-width: 2; stroke-linecap: round; }
 .series-label { font-size: 12px; font-weight: 600; }
 
 /* Bars grow from their baseline on first paint. transform-box makes the SVG

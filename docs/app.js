@@ -305,7 +305,27 @@ function overlapWarning() {
 
 /* --- small helpers ------------------------------------------------------ */
 
-const fmt = (v, digits = 1) => (v === null || v === undefined ? "n/a" : v.toFixed(digits));
+const NOT_PUBLISHED = "Not published";
+
+const fmt = (v, digits = 1) =>
+  (v === null || v === undefined ? NOT_PUBLISHED : v.toFixed(digits));
+
+/**
+ * Why a figure is missing. Eurostat withholds a cell when too few surveyed
+ * firms fall into it to give a reliable estimate, so an empty row means "not
+ * enough of this kind of business to measure", not "none of them do this" -
+ * two readings a blank space cannot distinguish on its own.
+ */
+const MISSING_REASON = "Eurostat withholds figures where too few surveyed businesses fall into the cell to be reliable.";
+
+/** One sentence naming what is absent, or null when nothing is. */
+function missingNote(labels) {
+  if (!labels.length) return null;
+  const list = labels.length <= 3
+    ? labels.join(", ").replace(/, ([^,]*)$/, " and $1")
+    : `${labels.length} of them`;
+  return `${list} not published for this selection. ${MISSING_REASON}`;
+}
 
 /**
  * An axis scale whose ticks are round numbers.
@@ -392,7 +412,7 @@ function rankedBars(container, items, { unitNote }) {
   const rowH = 22, padL = 150, padR = 58, padT = 8;
   const height = items.length * rowH + padT + 18;
   const width = 780, plotW = width - padL - padR;
-  const { max } = niceScale(Math.max(...items.map((d) => d.value), 1));
+  const { max } = niceScale(Math.max(...items.map((d) => d.value ?? 0), 1));
   const svg = el("svg", { viewBox: `0 0 ${width} ${height}`, role: "img" });
   const fills = {
     main: gradientFill(svg, `var(${SERIES_SLOTS[0]})`),
@@ -411,6 +431,25 @@ function rankedBars(container, items, { unitNote }) {
 
   items.forEach((d, i) => {
     const y = padT + i * rowH;
+    if (d.value === null || d.value === undefined) {
+      // A dropped row reads as "we never asked"; a marked one reads as
+      // "measured, then withheld", which is what actually happened.
+      svg.appendChild(el("text", {
+        x: padL - 10, y: y + rowH / 2 + 1, class: "cat-label missing",
+        "text-anchor": "end", text: d.label,
+      }));
+      svg.appendChild(el("line", {
+        x1: padL, x2: padL + 14, y1: y + rowH / 2 - 1, y2: y + rowH / 2 - 1,
+        class: "missing-rule",
+      }));
+      const tag = el("text", {
+        x: padL + 20, y: y + rowH / 2 + 1, class: "value-label missing",
+        text: NOT_PUBLISHED,
+      });
+      tag.appendChild(el("title", { text: MISSING_REASON }));
+      svg.appendChild(tag);
+      return;
+    }
     const w = Math.max(2, (d.value / max) * plotW);
     const kind = d.reference ? "ref" : (d.alt ? "alt" : "main");
     const solid = d.reference ? "var(--ink-muted)" : `var(${SERIES_SLOTS[d.alt ? 1 : 0]})`;
@@ -476,9 +515,19 @@ function groupedBars(container, categories, series, { unitNote }) {
 
     series.forEach((s, j) => {
       const v = s.values[i];
-      if (v === null || v === undefined) return;
-      // 2px surface gap between adjacent fills rather than a stroke around them.
       const y = top + 9 + j * 16;
+      if (v === null || v === undefined) {
+        svg.appendChild(el("line", {
+          x1: padL, x2: padL + 14, y1: y + 7, y2: y + 7, class: "missing-rule",
+        }));
+        const tag = el("text", {
+          x: padL + 20, y: y + 11, class: "value-label missing", text: NOT_PUBLISHED,
+        });
+        tag.appendChild(el("title", { text: MISSING_REASON }));
+        svg.appendChild(tag);
+        return;
+      }
+      // 2px surface gap between adjacent fills rather than a stroke around them.
       const w = Math.max(2, (v / max) * plotW);
       const bar = el("rect", {
         x: padL, y, width: w, height: 14, rx: 4, fill: fills[j], class: "bar-x",
@@ -634,15 +683,23 @@ function legend(series) {
  * Every chart ships with a table view. Three light-mode palette slots sit below
  * 3:1 on the surface, and the relief rule for those is a readable table.
  */
-function card(parent, { title, note, warn, draw, table }) {
+function card(parent, { title, note, warn, empty, draw, table }) {
   const box = el("div", { class: "card" });
   const head = el("div", { class: "card-head" });
   head.appendChild(el("h3", { class: "card-title", text: title }));
   const toggle = el("button", { class: "table-toggle", type: "button", text: "Show data" });
-  head.appendChild(toggle);
+  if (!empty) head.appendChild(toggle);
   box.appendChild(head);
   if (note) box.appendChild(el("p", { class: "card-note", text: note }));
   if (warn) box.appendChild(el("p", { class: "card-warn", text: warn }));
+
+  // Nothing to draw at all. An empty plot with axes and a legend reads as
+  // "everything is zero"; saying so in words reads as what it is.
+  if (empty) {
+    box.appendChild(el("p", { class: "card-empty", text: empty }));
+    parent.appendChild(box);
+    return;
+  }
 
   const chart = el("div", { class: "chart" });
   box.appendChild(chart);
@@ -696,7 +753,9 @@ function headlineTiles(root, { chartId, indicator }) {
       style: accent ? `--tile-accent: var(${accent})` : null,
     });
     node.appendChild(el("div", { class: "k", text: k }));
-    node.appendChild(el("div", { class: "v", text: v }));
+    node.appendChild(el("div", {
+      class: `v${/^[0-9]/.test(String(v)) ? "" : " v-text"}`, text: v,
+    }));
     node.appendChild(el("div", { class: "sub", text: sub }));
     return node;
   };
@@ -707,11 +766,15 @@ function headlineTiles(root, { chartId, indicator }) {
     ? facetValue(chartId, indicator, fs[1], year, weightingMode(chartId, indicator, fs[1], [year]))
     : null;
   const who = `${heldConstant()}, ${year}`;
-  tiles.appendChild(tile(fs[0].label, `${fmt(a)}%`, who, "accent", SERIES_SLOTS[0]));
-  if (fs[1]) tiles.appendChild(tile(fs[1].label, `${fmt(b)}%`, who, "compare", SERIES_SLOTS[1]));
+  const pct = (v) => (v === null || v === undefined ? NOT_PUBLISHED : `${fmt(v)}%`);
+  const why = (v) => (v === null || v === undefined ? MISSING_REASON : who);
+  tiles.appendChild(tile(fs[0].label, pct(a), why(a), "accent", SERIES_SLOTS[0]));
+  if (fs[1]) tiles.appendChild(tile(fs[1].label, pct(b), why(b), "compare", SERIES_SLOTS[1]));
   const multiple = a && b ? b / a : null;
-  tiles.appendChild(tile("The gap", multiple ? `${multiple.toFixed(1)}x` : "n/a",
-    fs[1] ? `${fs[1].label} vs ${fs[0].label}` : "pick a different comparison"));
+  const gapSub = !fs[1] ? "Pick a different comparison to see a gap."
+    : multiple ? `${fs[1].label} vs ${fs[0].label}`
+    : "A gap needs a published figure on both sides.";
+  tiles.appendChild(tile("The gap", multiple ? `${multiple.toFixed(1)}x` : "—", gapSub));
   tiles.appendChild(tile("EU27 benchmark", `${fmt(ref?.value)}%`,
     `Eurostat's published aggregate · ${dim().labelOf(sel().band)}`));
   root.appendChild(tiles);
@@ -768,20 +831,38 @@ function rankingCard(root, { chartId, indicator, title, note }) {
   const s = sel();
   const unitNote = unitNoteFor(SERIES[chartId].unit);
   const year = latestYear(chartId, { indicator });
-  const build = () => where(chartId, { indicator, [d.field]: s.band, time: year })
-    .map((r) => ({
-      code: r.geo, label: shortGeo(r.geo), value: r.value,
-      highlight: state.geos.includes(r.geo)
-        || (s.compareMode === "geo" && s.compareGeos.includes(r.geo)),
-      alt: s.compareMode === "geo" && s.compareGeos.includes(r.geo)
-        && !state.geos.includes(r.geo),
-      reference: r.geo === REF_GEO,
-    }))
-    .sort((a, b) => b.value - a.value);
+  const present = where(chartId, { indicator, [d.field]: s.band, time: year });
+  const have = new Set(present.map((r) => r.geo));
+  const mine = [...state.geos, ...(s.compareMode === "geo" ? s.compareGeos : []), REF_GEO];
+
+  // Countries the reader actually chose appear even when Eurostat publishes
+  // nothing for them - their absence is the finding. Everyone else is counted
+  // in a note rather than padding the chart with empty rows.
+  const missingMine = mine.filter((g) => !have.has(g));
+  const othersMissing = geoOptions().filter((g) => !have.has(g) && !mine.includes(g)).length;
+
+  const decorate = (geo, value) => ({
+    code: geo, label: shortGeo(geo), value,
+    highlight: state.geos.includes(geo)
+      || (s.compareMode === "geo" && s.compareGeos.includes(geo)),
+    alt: s.compareMode === "geo" && s.compareGeos.includes(geo)
+      && !state.geos.includes(geo),
+    reference: geo === REF_GEO,
+  });
+
+  const build = () => [
+    ...present.map((r) => decorate(r.geo, r.value)),
+    ...missingMine.map((g) => decorate(g, null)),
+  ].sort((a, b) => (b.value ?? -1) - (a.value ?? -1));
+
+  const notes = [note, missingNote(missingMine.map(shortGeo))];
+  if (othersMissing) {
+    notes.push(`${othersMissing} further ${othersMissing === 1 ? "country does" : "countries do"} not publish this figure and are left out of the ranking.`);
+  }
 
   card(root, {
     title: `${title} — ${d.labelOf(s.band)}, ${year}`,
-    note,
+    note: notes.filter(Boolean).join(" "),
     draw: (c) => rankedBars(c, build(), { unitNote }),
     table: () => ({ columns: ["Country", "%"], rows: build().map((x) => [x.label, fmt(x.value)]) }),
   });
@@ -823,9 +904,17 @@ function comparisonCard(root, chartId, { title, note, indicators }) {
       weightingMode(chartId, cat.code, f, [year]))),
   }));
 
+  const gaps = categories.filter((cat, i) => series.some((ser) => ser.values[i] === null));
+
   card(root, {
     title: `${title} — ${heldConstant()}, ${year}`,
-    note: `${note} Rows are ordered by the EU27 figure for ${d.labelOf(sel().band)}, so changing the selection moves the bars but never the row order.`,
+    empty: categories.length ? null
+      : `Eurostat publishes none of these figures for ${heldConstant()} in ${year}. ${MISSING_REASON} Not every country takes part in every part of the survey.`,
+    note: [
+      note,
+      `Rows are ordered by the EU27 figure for ${d.labelOf(sel().band)}, so changing the selection moves the bars but never the row order.`,
+      gaps.length ? `${gaps.length} row${gaps.length === 1 ? " is" : "s are"} missing a figure on one side. ${MISSING_REASON}` : null,
+    ].filter(Boolean).join(" "),
     warn: overlapWarning(),
     draw: (c) => groupedBars(c, categories, series, { unitNote }),
     table: () => ({
@@ -858,11 +947,15 @@ function breakdownRankCard(root, { chartId, indicator, title, note }) {
       highlight: picked.includes(code),
       alt: picked.indexOf(code) === 1,
     };
-  }).filter((x) => x.value !== null).sort((a, b) => b.value - a.value);
+  }).sort((a, b) => (b.value ?? -1) - (a.value ?? -1));
+
+  const absent = build().filter((x) => x.value === null).map((x) => x.label);
 
   card(root, {
     title: `${title} — ${geosLabel(state.geos)}, ${year}`,
-    note,
+    empty: build().some((x) => x.value !== null) ? null
+      : `Eurostat publishes none of these figures for ${geosLabel(state.geos)} in ${year}. ${MISSING_REASON}`,
+    note: [note, missingNote(absent)].filter(Boolean).join(" "),
     draw: (c) => rankedBars(c, build(), { unitNote }),
     table: () => ({
       columns: [d.control, "%"], rows: build().map((x) => [x.label, fmt(x.value)]),
@@ -885,7 +978,8 @@ function ordinalCard(root, { chartId, indicator, options, title, note, kindLabel
 
   card(root, {
     title: `${title} — ${geosLabel(state.geos)}, ${year}`,
-    note,
+    note: [note, missingNote(items.filter((x) => x.value === null).map((x) => x.label))]
+      .filter(Boolean).join(" "),
     draw: (c) => ordinalBars(c, items, { unitNote, highlight: picked }),
     table: () => ({
       columns: [kindLabel, "%"], rows: items.map((x) => [x.label, fmt(x.value)]),
@@ -912,6 +1006,8 @@ const PLAIN_NOTES = [
    "The EU27 figure is published by Eurostat and weighted by how many businesses each country has. It is shown exactly as published and never recalculated, so it will always match Eurostat's own tables."],
   ["Counts of businesses are estimates",
    "Percentages come from one survey and the number of businesses from another. The two cover slightly different populations and only overlap for 2021 to 2024, so any figure expressed as a number of companies is an estimate, not an exact count."],
+  ["Some figures are simply not published",
+   "Where a chart says “not published”, Eurostat measured the cell but withheld the number because too few surveyed businesses fell into it to be reliable. Italy’s energy and water sectors in 2025 are an example: too few firms of 10 or more employees for a dependable estimate. A blank therefore means “too small to measure here”, never “nobody does this” — and it happens more often in small countries and narrow sectors."],
   ["A gap is not a cause",
    "This page shows where differences sit — between sizes, ages and countries. It cannot say what causes them. A country doing well may differ in a dozen ways this data never records."],
 ];
@@ -951,7 +1047,7 @@ function renderMethodology(root) {
 
 const HOW_TO_READ = {
   id: "method", nav: "How to read this", h2: "How to read this",
-  deck: "Seven things that change what these numbers mean. They are worth two minutes before you quote any figure from this page.",
+  deck: "Eight things that change what these numbers mean. They are worth two minutes before you quote any figure from this page.",
   render: renderMethodology,
 };
 
