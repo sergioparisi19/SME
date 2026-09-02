@@ -153,13 +153,13 @@ main { flex: 1 1 auto; min-width: 0; padding: 0 44px 96px; max-width: 1180px; }
 }
 
 .viewswitch {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px;
   background: rgba(0, 0, 0, 0.28); border: 1px solid var(--rail-border);
   border-radius: 10px; margin-bottom: 22px;
 }
 .viewswitch button {
-  border: 0; background: none; border-radius: 7px; padding: 8px 4px;
-  font: inherit; font-size: 13px; color: var(--rail-ink-2); cursor: pointer;
+  border: 0; background: none; border-radius: 7px; padding: 8px 2px;
+  font: inherit; font-size: 12.5px; color: var(--rail-ink-2); cursor: pointer;
   transition: background 140ms ease, color 140ms ease;
 }
 .viewswitch button:hover { color: var(--rail-ink); }
@@ -173,16 +173,17 @@ main { flex: 1 1 auto; min-width: 0; padding: 0 44px 96px; max-width: 1180px; }
   color: var(--rail-ink-2); margin: 0 0 8px; opacity: 0.8;
 }
 
-nav.analyses ol { list-style: none; margin: 0; padding: 0; counter-reset: a; }
+nav.analyses ol { list-style: none; margin: 0; padding: 0; }
+.nav-part {
+  font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--rail-ink-2); opacity: 0.65; margin: 16px 0 5px; padding: 0 9px;
+}
+.nav-part:first-child { margin-top: 0; }
 nav.analyses a {
   display: flex; gap: 9px; align-items: baseline;
   padding: 7px 9px; border-radius: 8px; text-decoration: none;
   color: var(--rail-ink-2); font-size: 13.5px; line-height: 1.35;
   transition: background 130ms ease, color 130ms ease;
-}
-nav.analyses a::before {
-  counter-increment: a; content: counter(a);
-  font-size: 11px; opacity: 0.6; font-variant-numeric: tabular-nums;
 }
 nav.analyses a:hover { background: rgba(255, 255, 255, 0.06); color: var(--rail-ink); }
 nav.analyses a[aria-current="true"] {
@@ -244,16 +245,24 @@ nav.analyses a[aria-current="true"] {
   font: inherit; font-size: 13.5px; color: var(--ink-2); cursor: pointer; text-align: left;
 }
 .dd-option:hover { background: var(--sunken); color: var(--ink); }
-.dd-option[aria-selected="true"] { color: var(--ink); font-weight: 600; }
-.dd-box {
-  width: 15px; height: 15px; border-radius: 4px; flex: none;
-  border: 1.5px solid var(--axis); display: grid; place-items: center;
-  font-size: 10px; color: #fff;
+.dd-all { border-bottom: 1px solid var(--border); border-radius: 8px 8px 0 0; margin-bottom: 4px; }
+.dd-all .geo-badge { background: var(--ink-2); letter-spacing: 0.06em; }
+.dd-all[aria-selected="true"] .geo-badge { background: var(--series-1); }
+.dd-option[aria-selected="true"] { color: var(--ink); font-weight: 600; background: var(--sunken); }
+.dd-check { margin-left: auto; color: var(--series-1); font-weight: 700; }
+
+/* A country code, not a flag emoji: Windows ships no flag glyphs, so an emoji
+   flag degrades there to the bare letter pair anyway. The badge renders the
+   same on every platform and carries the series colour with it. */
+.geo-badge {
+  flex: none; display: inline-grid; place-items: center;
+  min-width: 26px; height: 19px; padding: 0 5px;
+  border-radius: 5px; background: var(--series-1); color: #fff;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em;
 }
-.dd-option[aria-selected="true"] .dd-box {
-  background: currentColor; border-color: currentColor;
-}
-.dd-option[aria-selected="true"] .dd-box::after { content: "✓"; color: var(--surface); font-weight: 700; }
+.dd-option .geo-badge { background: var(--ink-muted); }
+.dd-option[aria-selected="true"] .geo-badge { background: var(--series-1); }
+.dd-badges { display: inline-flex; gap: 3px; flex: none; }
 .dd-foot {
   border-top: 1px solid var(--border); padding: 8px 12px;
   font-size: 11px; color: var(--ink-muted);
@@ -293,6 +302,11 @@ section > .deck { color: var(--ink-2); margin: 0 0 20px; max-width: 66ch; }
 .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .card-title { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.005em; }
 .card-note { font-size: 12px; color: var(--ink-muted); margin: 6px 0 16px; max-width: 82ch; line-height: 1.5; }
+.card-empty {
+  margin: 6px 0 10px; padding: 22px; border-radius: 10px;
+  background: var(--sunken); border: 1px dashed var(--axis);
+  color: var(--ink-2); font-size: 13.5px; text-align: center; max-width: 72ch;
+}
 .card-warn {
   margin: 0 0 14px; padding: 9px 12px; border-radius: 9px;
   background: var(--sunken); border: 1px solid var(--border);
@@ -323,6 +337,10 @@ section > .deck { color: var(--ink-2); margin: 0 0 20px; max-width: 66ch; }
 }
 .tile .k { font-size: 11.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-muted); }
 .tile .v { font-size: 40px; line-height: 1.05; margin: 12px 0 5px; letter-spacing: -0.028em; }
+/* "Not published" is a sentence, not a figure - at hero size it wraps and
+   shouts louder than the numbers it sits beside. */
+.tile .v.v-count { font-size: 30px; letter-spacing: -0.02em; }
+.tile .v.v-text { font-size: 21px; line-height: 1.2; letter-spacing: -0.01em; color: var(--ink-2); }
 .tile .sub { font-size: 12.5px; color: var(--ink-2); }
 .tile.accent .v { color: var(--series-1); }
 .tile.compare .v { color: var(--series-2); }
@@ -343,6 +361,15 @@ section > .deck { color: var(--ink-2); margin: 0 0 20px; max-width: 66ch; }
 }
 .cat-label.clipped:hover { fill: var(--ink); text-decoration-color: var(--ink-muted); }
 .value-label { fill: var(--ink-2); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* A withheld figure is marked, not hidden: a short rule where the bar would
+   start, and the reason on hover. Muted and italic so it never reads as data. */
+.cat-label.missing { fill: var(--ink-muted); font-style: italic; }
+.value-label.missing {
+  fill: var(--ink-muted); font-weight: 400; font-style: italic;
+  font-size: 10.5px; cursor: help;
+}
+.missing-rule { stroke: var(--axis); stroke-width: 2; stroke-linecap: round; }
 .series-label { font-size: 12px; font-weight: 600; }
 
 /* Bars grow from their baseline on first paint. transform-box makes the SVG
@@ -417,3 +444,26 @@ footer.colophon {
 }
 
 .loading { padding: 60px 44px; color: var(--ink-muted); }
+
+/* --- Plain-language notes ----------------------------------------------- */
+
+.notes { display: grid; gap: 14px; }
+.note {
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--series-1);
+  border-radius: 12px; padding: 16px 20px; box-shadow: var(--shadow-1);
+}
+.note h3 { margin: 0 0 6px; font-size: 15px; letter-spacing: -0.005em; }
+.note p { margin: 0; color: var(--ink-2); font-size: 14px; max-width: 78ch; }
+
+details.technical {
+  margin-top: 22px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 12px; padding: 4px 20px;
+}
+details.technical summary {
+  cursor: pointer; padding: 13px 0; font-size: 13.5px; color: var(--ink-2);
+}
+details.technical summary:hover { color: var(--ink); }
+details.technical[open] summary { border-bottom: 1px solid var(--grid); margin-bottom: 6px; }
+details.technical .caveats li { font-size: 13px; }
+details.technical .caveats li:last-child { border-bottom: 0; }

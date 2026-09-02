@@ -21,6 +21,7 @@
 
     <div class="viewswitch" id="viewswitch" role="tablist" aria-label="Unit of observation">
       <button type="button" role="tab" data-view="firm" aria-selected="true">Companies</button>
+      <button type="button" role="tab" data-view="sector" aria-selected="false">Industry</button>
       <button type="button" role="tab" data-view="individual" aria-selected="false">Individuals</button>
     </div>
 
@@ -48,18 +49,18 @@
         <select id="primary-select"></select>
       </div>
 
-      <div class="field" id="fld-compare">
-        <label for="compare-select">Compare with</label>
-        <select id="compare-select"></select>
+      <div class="field">
+        <label for="compare-mode">Compare by</label>
+        <select id="compare-mode">
+          <option value="band" id="opt-mode-band">Size band</option>
+          <option value="geo">Country</option>
+        </select>
       </div>
 
       <div class="field">
-        <label for="agg-select">Multi-country figure</label>
-        <select id="agg-select">
-          <option value="none">Show each separately</option>
-          <option value="weighted">Weighted average (by enterprises)</option>
-          <option value="unweighted">Unweighted country average</option>
-        </select>
+        <label for="compare-select" id="lbl-compare">Compare with</label>
+        <select id="compare-select"></select>
+        <div class="dropdown" id="dd-compare" hidden></div>
       </div>
     </div>
 
