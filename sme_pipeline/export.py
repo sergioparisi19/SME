@@ -12,6 +12,11 @@ Two rules are enforced here rather than left to the page:
    one error that produces charts which look right and are wrong.
 2. Unknown indicator codes raise, naming the code. A silently dropped series
    becomes an empty chart nobody notices.
+
+Reading guide: the first section is the declarative page contract; the middle
+section filters canonical DataFrames into compact chart payloads; the final
+section adds labels/provenance and writes JSON. Browser rendering stays in
+`docs/app.js`, never here.
 """
 
 from __future__ import annotations
@@ -23,6 +28,8 @@ from pathlib import Path
 import pandas as pd
 
 from .config import PROCESSED_DIR
+
+# --- Page contract ----------------------------------------------------------
 
 # "docs" rather than "site": GitHub Pages' branch deployment only offers the
 # repository root or /docs as a source, never an arbitrary folder.
@@ -230,6 +237,8 @@ TRENDED = {"ai_adoption", "sector_adoption", "workforce"}
 RECENT_YEARS = 3
 
 
+# --- Chart payload construction --------------------------------------------
+
 def _trim_years(subset: pd.DataFrame, chart_id: str) -> pd.DataFrame:
     if chart_id in TRENDED:
         return subset
@@ -399,6 +408,8 @@ def build_individual_charts(df: pd.DataFrame) -> tuple[dict, set[str]]:
 
     return charts, used_indicators
 
+
+# --- Bundle metadata and persistence ---------------------------------------
 
 def build_labels(datamaps: dict[str, dict], used: dict[str, set[str]]) -> dict:
     """Slice each datamap's vocabulary down to the codes the page references."""
