@@ -32,6 +32,10 @@ considered AI and declined, a population defined partly by the outcome, so a
 positive association can be pure composition: in high-adoption countries the
 firms that declined are more sophisticated and cite more sophisticated reasons.
 The exported `sign` exists so the page can say so rather than imply a driver.
+
+Reading guide: panel assembly selects comparable country-year cells; model
+primitives contain the numerical work; the public functions at the end produce
+the tier ranking and country-level decomposition.
 """
 
 from __future__ import annotations
@@ -104,6 +108,8 @@ def geo_labels() -> dict[str, str]:
     return {**codes, ALL_MEAN: ALL_MEAN_LABEL}
 
 
+# --- Panel assembly ---------------------------------------------------------
+
 def _panel(df: pd.DataFrame, tier: str, years: list[str] | None = None) -> pd.DataFrame:
     """One row per country-year: the seven barriers and the adoption rate.
 
@@ -133,6 +139,8 @@ def _eu_exposure(df: pd.DataFrame, tier: str) -> dict[str, float]:
     latest = rows[rows["time"] == rows["time"].max()]
     return {r.indicator: round(float(r.value), 1) for r in latest.itertuples()}
 
+
+# --- Model primitives -------------------------------------------------------
 
 def _prepare(panel: pd.DataFrame):
     """Absorb the year effects once, then work in NumPy.
@@ -286,6 +294,8 @@ def _aggregate_targets(df: pd.DataFrame, tier: str, panel: pd.DataFrame) -> pd.D
                            **{c: float(block[c].mean()) for c in BARRIERS}})
     return pd.DataFrame(frames)
 
+
+# --- Public reporting API ---------------------------------------------------
 
 def by_country(df: pd.DataFrame, labels: dict[str, str] | None = None,
                years: list[str] | None = None, latest_only: bool = True) -> pd.DataFrame:
