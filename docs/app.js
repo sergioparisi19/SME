@@ -27,6 +27,17 @@ const ORDINAL_SLOTS = [
 ];
 
 const SIZE_ORDER = ["SMALL_10_49", "MEDIUM_50_249", "LARGE_GE250", "SME_10_249", "ALL_GE10"];
+
+/* Short forms of the size bands. Eurostat's own labels ("From 10 to 49 persons
+ * employed") do not fit a badge, and once several bands are combined into one
+ * series they do not fit a legend entry either. */
+const SIZE_BADGE = {
+  SMALL_10_49: "10–49",
+  MEDIUM_50_249: "50–249",
+  LARGE_GE250: "250+",
+  SME_10_249: "SME",
+  ALL_GE10: "10+",
+};
 const AGE_ORDER = ["IND_TOTAL", "Y16_24", "Y25_34", "Y35_44", "Y45_54", "Y55_64", "Y65_74"];
 const EDU_ORDER = ["I0_2", "I3_4", "I5_8"];
 
@@ -59,25 +70,28 @@ const CONTAINS = {
   IND_TOTAL: AGE_ORDER.filter((c) => c !== "IND_TOTAL").concat(EDU_ORDER),
 };
 
+/* Both sides of the comparison are lists, never single codes: a side is one or
+ * more countries crossed with one or more bands, and the whole page averages
+ * over that set. A single selection is simply a list of one. */
 const state = {
   view: "firm",
-  geos: ["IT"],           // one country, or several averaged together
+  geos: ["IT"],           // one country, or several combined into one figure
   firm: {
-    band: "SMALL_10_49",
+    bands: ["SMALL_10_49"],       // one size band, or several combined
     compareMode: "band",          // band | geo
-    compareBand: "LARGE_GE250",
+    compareBands: ["LARGE_GE250"],
     compareGeos: ["DE"],
   },
   sector: {
-    band: "C",
+    bands: ["C"],
     compareMode: "band",
-    compareBand: "J",
+    compareBands: ["J"],
     compareGeos: ["DE"],
   },
   individual: {
-    band: "Y25_34",
+    bands: ["Y25_34"],
     compareMode: "band",
-    compareBand: "Y55_64",
+    compareBands: ["Y55_64"],
     compareGeos: ["DE"],
   },
 };
@@ -115,6 +129,69 @@ function yearsOf(chartId, filter = {}) {
 
 const latestYear = (chartId, filter) => yearsOf(chartId, filter).slice(-1)[0];
 
+/* --- how many businesses sit in each cell -------------------------------- */
+
+/**
+ * Every average this page computes is weighted by the number of businesses in
+ * each cell it combines - a cell being one country crossed with one band. The
+ * weights are the business-register counts already carried on the rows; they
+ * are indexed once here so any chart can look up the weight for a cell,
+ * including the charts whose own percentages are a share of something narrower
+ * than all enterprises and which therefore ship no counts of their own.
+ *
+ * Keyed by field, so a size band and a sector never collide.
+ */
+const WEIGHTS = {};
+
+/* The breakdowns a group can be built from, and the column that says how big
+ * each cell is. Only the enterprise column exists today: the household survey
+ * publishes percentages of people with no population beside them, so an age
+ * group is a plain average until a population table is added to the pipeline.
+ * Naming the column here is all this layer needs to start weighting them. */
+const BREAKDOWN_FIELDS = ["size_emp", "nace_r2", "ind_type"];
+const COUNT_COLUMNS = ["enterprise_count", "person_count"];
+
+function buildWeights() {
+  Object.values(SERIES).forEach((chart) => {
+    const field = BREAKDOWN_FIELDS.find((f) => chart.columns.includes(f));
+    const countCol = COUNT_COLUMNS.find((c) => chart.columns.includes(c));
+    if (!field || !countCol) return;
+    const at = {
+      geo: chart.columns.indexOf("geo"),
+      time: chart.columns.indexOf("time"),
+      code: chart.columns.indexOf(field),
+      count: chart.columns.indexOf(countCol),
+    };
+    chart.rows.forEach((row) => {
+      const count = row[at.count];
+      if (typeof count !== "number" || count <= 0) return;
+      const key = `${field}|${row[at.geo]}|${row[at.code]}`;
+      (WEIGHTS[key] ??= {})[row[at.time]] = count;
+    });
+  });
+}
+
+/**
+ * The weight for one cell: its own year's count where the register has one,
+ * otherwise the nearest year's.
+ *
+ * The register runs 2021-2024 while the survey runs to 2025, so insisting on an
+ * exact year would drop the newest figures back to an unweighted mean - and the
+ * difference between a weighted and an unweighted average of countries is far
+ * larger than the drift in how many businesses a country holds from one year to
+ * the next. `exact` says which happened, so a card can label it.
+ */
+function weightAt(field, geo, code, time) {
+  const byYear = WEIGHTS[`${field}|${geo}|${code}`];
+  if (!byYear) return null;
+  if (byYear[time]) return { count: byYear[time], year: time, exact: true };
+  const nearest = Object.keys(byYear)
+    .sort((a, b) => Math.abs(a - time) - Math.abs(b - time) || b - a)[0];
+  return nearest === undefined
+    ? null
+    : { count: byYear[nearest], year: nearest, exact: false };
+}
+
 function label(kind, code) {
   const entry = LABELS[kind]?.[code];
   if (entry === undefined) return code;
@@ -123,6 +200,11 @@ function label(kind, code) {
 
 const bandLabel = (code) => label("size_emp", code).replace(" persons employed", "");
 const cutLabel = (code) => LABELS.ind_type?.[code]?.label ?? code;
+
+/* Eurostat's age labels are already short ("25-34"), so the badge is the label
+ * itself. Only the total needs shortening, and naming its range rather than
+ * calling it "all" keeps it comparable to the bands beside it. */
+const cutBadge = (code) => (code === "IND_TOTAL" ? "16–74" : cutLabel(code));
 
 /** The base population a unit's percentage is a share of - shown in every tooltip. */
 function unitNoteFor(unitCode) {
@@ -157,20 +239,31 @@ function shortLabel(full, cap = 52) {
 
 /* --- the active breakdown ----------------------------------------------- */
 
+/**
+ * `multi` decides whether the breakdown is a multi-select.
+ *
+ * Only the age bands carry it. A size band is a group a reader compares, not
+ * one they build: Eurostat already publishes the two combinations anyone wants
+ * - SME_10_249 and ALL_GE10 - as their own bands, weighted by Eurostat, so
+ * combining 10–49 with 50–249 by hand only reproduces a published figure less
+ * accurately. Age bands have no such published combination: "the workforce",
+ * "everyone under 45", "the cohort about to retire" exist only if the reader
+ * builds them.
+ */
 const DIMENSIONS = {
   firm: {
-    control: "Size band", field: "size_emp",
-    options: SIZE_ORDER, labelOf: bandLabel,
+    control: "Size band", field: "size_emp", noun: "size band", multi: false,
+    options: SIZE_ORDER, labelOf: bandLabel, badgeOf: (c) => SIZE_BADGE[c] ?? c,
     clean: "10–49, 50–249 and 250+",
   },
   sector: {
-    control: "Sector", field: "nace_r2",
-    options: SECTIONS, labelOf: sectorLabel,
+    control: "Sector", field: "nace_r2", noun: "sector", multi: false,
+    options: SECTIONS, labelOf: sectorLabel, badgeOf: (c) => c,
     clean: "any two sectors",
   },
   individual: {
-    control: "Age band", field: "ind_type",
-    options: AGE_ORDER, labelOf: cutLabel,
+    control: "Age band", field: "ind_type", noun: "age band", multi: true,
+    options: AGE_ORDER, labelOf: cutLabel, badgeOf: cutBadge,
     clean: "any two of the six age bands",
   },
 };
@@ -201,23 +294,25 @@ const homeFirst = (geos) =>
  * the reader nothing.
  */
 function facets() {
-  const s = sel(), d = dim();
+  const s = sel();
   const byBand = s.compareMode === "band";
   const a = {
-    geos: state.geos, band: s.band, slot: SERIES_SLOTS[0],
-    label: byBand ? d.labelOf(s.band) : geosLabel(state.geos),
+    geos: state.geos, bands: s.bands, slot: SERIES_SLOTS[0],
+    label: byBand ? bandsLabel(s.bands) : geosLabel(state.geos),
   };
   const b = byBand
-    ? { geos: state.geos, band: s.compareBand, slot: SERIES_SLOTS[1],
-        label: d.labelOf(s.compareBand) }
-    : { geos: s.compareGeos, band: s.band, slot: SERIES_SLOTS[1],
+    ? { geos: state.geos, bands: s.compareBands, slot: SERIES_SLOTS[1],
+        label: bandsLabel(s.compareBands) }
+    : { geos: s.compareGeos, bands: s.bands, slot: SERIES_SLOTS[1],
         label: geosLabel(s.compareGeos) };
 
   // Same slice twice is one series, not two identical bars.
-  const same = a.band === b.band
-    && a.geos.length === b.geos.length && a.geos.every((g) => b.geos.includes(g));
-  return same ? [a] : [a, b];
+  const sameSet = (x, y) => x.length === y.length && x.every((v) => y.includes(v));
+  return sameSet(a.bands, b.bands) && sameSet(a.geos, b.geos) ? [a] : [a, b];
 }
+
+/** Eurostat's own aggregate, read for whatever breakdown is selected. */
+const euFacet = () => ({ geos: [REF_GEO], bands: sel().bands, label: "EU27" });
 
 /**
  * How a country selection names itself. A bare count is ambiguous the moment
@@ -230,84 +325,185 @@ function geosLabel(geos) {
   return `${geos.length} countries`;
 }
 
+/**
+ * The same for a selection of bands. A combined group is named with the short
+ * badges joined by "+", which reads as the addition it is; past three the count
+ * carries it, as with countries.
+ */
+function bandsLabel(bands) {
+  const d = dim();
+  if (bands.length === 1) return d.labelOf(bands[0]);
+  if (bands.length <= 3) return bands.map((c) => d.badgeOf(c)).join(" + ");
+  return `${bands.length} ${d.noun}s`;
+}
+
 /** What stays fixed across the comparison - it belongs in the title, not the legend. */
 function heldConstant() {
   const s = sel();
-  return s.compareMode === "band" ? geosLabel(state.geos) : dim().labelOf(s.band);
+  return s.compareMode === "band" ? geosLabel(state.geos) : bandsLabel(s.bands);
 }
 
 /**
- * Combine one value per country into a single figure, the way Eurostat builds
- * EU27: weighted by how many enterprises each country has, not a plain mean of
- * the countries. The two differ a lot, because adoption tracks economy size.
+ * Combine one value per cell into a single figure, the way Eurostat builds
+ * EU27: weighted by how many businesses each cell holds, never one cell one
+ * vote. A cell is a country crossed with a band, so this is the same operation
+ * whether the reader selected several countries, several size bands, or both -
+ * the group is the cross product and every member of it counts in proportion
+ * to its businesses.
  *
- * Weighting needs an enterprise count, which exists only for a unit that is a
- * share of all enterprises, and only for 2021-2024. Where it is missing the
- * result falls back to an unweighted mean, and `weighted` says which happened
- * so the caller can label it honestly rather than implying precision it lacks.
+ * Weighting needs a count for every cell. Where one is missing the result falls
+ * back to an unweighted mean, and `weighted` says which happened so the caller
+ * can label it honestly rather than implying precision it lacks.
  */
-function aggregateValues(records, weightable) {
-  if (!records.length) return null;
-  if (records.length === 1) {
-    return { value: records[0].value, weighted: false, n: 1 };
+function aggregateValues(records, field, weightable) {
+  const rs = records.filter((r) => typeof r.value === "number");
+  if (!rs.length) return null;
+  if (rs.length === 1) {
+    return { value: rs[0].value, weighted: false, n: 1, carried: false };
   }
-  const counts = records.map((r) => r.enterprise_count);
-  const canWeight = weightable !== false
-    && counts.every((c) => typeof c === "number" && c > 0);
+  const weights = rs.map((r) => weightAt(field, r.geo, r[field], r.time));
+  const canWeight = weightable !== false && weights.every((w) => w && w.count > 0);
   if (canWeight) {
-    const total = counts.reduce((a, b) => a + b, 0);
+    const total = weights.reduce((a, w) => a + w.count, 0);
     return {
-      value: records.reduce((acc, r) => acc + r.value * r.enterprise_count, 0) / total,
-      weighted: true, n: records.length,
+      value: rs.reduce((acc, r, i) => acc + r.value * weights[i].count, 0) / total,
+      weighted: true, n: rs.length,
+      carried: weights.some((w) => !w.exact),
     };
   }
   return {
-    value: records.reduce((acc, r) => acc + r.value, 0) / records.length,
-    weighted: false, n: records.length,
+    value: rs.reduce((acc, r) => acc + r.value, 0) / rs.length,
+    weighted: false, n: rs.length, carried: false,
   };
 }
+
+/** The rows one side of the comparison covers in one year: geos x bands. */
+const cellsOf = (chartId, indicator, f, time) =>
+  where(chartId, { indicator, [dim().field]: f.bands, time, geo: f.geos });
 
 /**
  * Decide once, for a whole series, whether it can be weighted.
  *
- * Enterprise counts only exist for 2021-2024, so deciding year by year would
- * weight a trend's 2024 point and not its 2025 one - two different methods
- * inside one line, and a step in the series that is an artefact of the method
- * rather than anything in the data. If any year the series needs is missing a
- * count, the whole series falls back to a plain average.
+ * Deciding year by year would weight a trend's 2024 point and not its 2025 one
+ * - two different methods inside one line, and a step in the series that is an
+ * artefact of the method rather than anything in the data. If any cell in any
+ * year the series needs has no weight, the whole series falls back to a plain
+ * average.
  */
 function weightingMode(chartId, indicator, f, times) {
-  if (SERIES[chartId].weightable !== true) return false;
-  if (f.geos.length < 2) return false;
-  return times.every((t) => {
-    const recs = where(chartId, { indicator, [dim().field]: f.band, time: t, geo: f.geos });
-    return recs.length === f.geos.length
-      && recs.every((r) => typeof r.enterprise_count === "number" && r.enterprise_count > 0);
-  });
+  const field = dim().field;
+  if (f.geos.length * f.bands.length < 2) return false;
+  return times.every((t) => cellsOf(chartId, indicator, f, t)
+    .every((r) => weightAt(field, r.geo, r[field], r.time)));
 }
 
 function facetStat(chartId, indicator, f, time, weightable) {
-  const recs = where(chartId, { indicator, [dim().field]: f.band, time, geo: f.geos });
-  return aggregateValues(recs, weightable);
+  return aggregateValues(cellsOf(chartId, indicator, f, time), dim().field, weightable);
 }
 
 const facetValue = (chartId, indicator, f, time, weightable) =>
   facetStat(chartId, indicator, f, time, weightable)?.value ?? null;
+
+/**
+ * Eurostat's published aggregate for the selected breakdown.
+ *
+ * With one band this is the published figure, shown exactly as published. With
+ * several it combines EU27's own published figure for each band, weighted by
+ * EU27's own business counts - still Eurostat's numbers throughout, never an
+ * average of the member states.
+ */
+function euValueAt(chartId, indicator, time, times = [time]) {
+  const f = euFacet();
+  return facetValue(chartId, indicator, f, time,
+    weightingMode(chartId, indicator, f, times));
+}
+
+/**
+ * How a group was combined, in one sentence, or null when nothing was combined.
+ *
+ * Written per side and de-duplicated: two sides that landed on the same method
+ * do not need saying twice.
+ */
+function weightingNote(chartId, indicator, fs, times) {
+  if (!times.length) return null;
+  const groups = fs.filter((f) => f.geos.length * f.bands.length > 1);
+  const messages = new Set(groups.map((f) => {
+    const stat = facetStat(chartId, indicator, f, times[times.length - 1],
+      weightingMode(chartId, indicator, f, times));
+    if (!stat?.weighted) {
+      return "The selection is combined as a plain average, each part counting equally. "
+        + (state.view === "individual"
+          ? "These figures count people rather than businesses and Eurostat publishes no "
+            + "population size beside them, so there is nothing to weight by."
+          : "No business count is published for every part of this selection, so it cannot "
+            + "be weighted the way EU27 is.");
+    }
+    let text = "The selection is combined the way Eurostat builds EU27 — every country and "
+      + `${dim().noun} in it weighted by how many businesses it holds, not a plain average.`;
+    if (SERIES[chartId].weightable !== true) {
+      text += " This measure is a share of a narrower group than all businesses, and Eurostat "
+        + "does not publish the size of that group, so the weights are how many businesses each "
+        + "part holds in total — a proxy, not the exact denominator.";
+    }
+    if (stat.carried) {
+      text += " Years the business register does not reach borrow the nearest year's counts,"
+        + " so one method holds across the whole series.";
+    }
+    return text;
+  }));
+  return messages.size ? [...messages].join(" ") : null;
+}
 
 function bandsOverlap(a, b) {
   if (a === b) return true;
   return (CONTAINS[a] || []).includes(b) || (CONTAINS[b] || []).includes(a);
 }
 
-/** Only meaningful when the comparison varies the band; two countries never overlap. */
+/** The first pair inside one selection where one band contains the other. */
+function overlapInside(bands) {
+  for (let i = 0; i < bands.length; i++) {
+    for (let j = i + 1; j < bands.length; j++) {
+      if (bandsOverlap(bands[i], bands[j])) return [bands[i], bands[j]];
+    }
+  }
+  return null;
+}
+
+/**
+ * Overlap is now possible in two places, and they are different mistakes.
+ *
+ * Inside one selection it double-counts: combining "10 to 249" with "10 to 49"
+ * puts the same firms in the group twice, and the weighted average leans on
+ * them twice over. Between the two sides it is not a comparison at all, but a
+ * part measured against its whole. Both get said, in that order.
+ */
 function overlapWarning() {
-  const s = sel();
-  if (s.compareMode !== "band") return null;
-  if (!bandsOverlap(s.band, s.compareBand)) return null;
-  const d = dim();
-  if (s.band === s.compareBand) return "Both bands are the same, so only one series is shown.";
-  return `${d.control}s overlap: ${d.labelOf(s.band)} and ${d.labelOf(s.compareBand)} are not `
-    + `mutually exclusive, so one contains the other. Pick ${d.clean} for a clean comparison.`;
+  const s = sel(), d = dim();
+  const notes = [];
+
+  const within = (bands, side) => {
+    const pair = overlapInside(bands);
+    if (!pair) return;
+    notes.push(`${side} combines ${d.labelOf(pair[0])} with ${d.labelOf(pair[1])}, and one `
+      + `contains the other, so those businesses count twice in it. Pick ${d.clean} for a `
+      + "group that adds up.");
+  };
+  within(s.bands, "Your selection");
+
+  if (s.compareMode === "band") {
+    within(s.compareBands, "The comparison");
+    const across = s.bands.some((a) => s.compareBands.some((b) => bandsOverlap(a, b)));
+    if (across) {
+      const identical = s.bands.length === s.compareBands.length
+        && s.bands.every((c) => s.compareBands.includes(c));
+      notes.push(identical
+        ? "Both sides are the same selection, so only one series is shown."
+        : `The two sides overlap: ${bandsLabel(s.bands)} and ${bandsLabel(s.compareBands)} are `
+          + `not mutually exclusive, so one holds part of the other. Pick ${d.clean} for a `
+          + "clean comparison.");
+    }
+  }
+  return notes.length ? notes.join(" ") : null;
 }
 
 /* --- small helpers ------------------------------------------------------ */
@@ -399,6 +595,11 @@ function showTip(evt, html) {
 }
 const hideTip = () => { tooltip.style.opacity = "0"; };
 
+/* A touch has no mouseleave. Mobile browsers synthesize a mousemove on tap, so
+ * a tooltip does appear - and would then sit there until the next tap landed on
+ * another mark. Scrolling or touching anywhere else dismisses it. */
+document.addEventListener("touchstart", hideTip, { passive: true });
+
 /**
  * `dim` marks the node as a data mark, which the sibling-dimming hover rule
  * acts on. Axis labels want the tooltip without the dimming, so they pass false.
@@ -412,38 +613,96 @@ function attachTip(node, html, dimOthers = true) {
 const tipRow = (color, text) =>
   `<div class="tt-row"><span class="swatch" style="background:${color}"></span>${text}</div>`;
 
+/* --- responsive geometry ------------------------------------------------ */
+
+/**
+ * The coordinate space a chart draws in, decided from the width it will really
+ * occupy rather than from the device.
+ *
+ * Above the breakpoint nothing changes: the charts keep the fixed 780/900-unit
+ * viewBox they were designed in, which the container scales up slightly. Below
+ * it, the viewBox is set to the container's own pixel width so that one unit is
+ * one pixel — the whole reason a phone renders these unreadably today is that a
+ * 900-unit box squeezed into 320px takes a 12px label down to four.
+ *
+ * Everything downstream branches on `narrow`, never on a user-agent string: a
+ * desktop window dragged narrow has exactly the same problem as a phone.
+ */
+const NARROW_AT = 560;
+
+function geometry(container, wide) {
+  const measured = Math.round(container.getBoundingClientRect().width) || wide;
+  return measured < NARROW_AT
+    ? { narrow: true, width: Math.max(280, measured) }
+    : { narrow: false, width: wide };
+}
+
+/**
+ * Cut a label to what fits a gutter, keeping the full text for the tooltip.
+ *
+ * ~6.1px per character at 11-12px in the system sans, measured on the labels
+ * this page actually draws (country and sector names, not caps or digits).
+ */
+function fitLabel(text, px) {
+  const max = Math.max(4, Math.floor(px / 6.1));
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
 /* --- chart primitives --------------------------------------------------- */
 
 /** Horizontal ranked bars. One series, so one colour; `highlight` lifts members. */
 function rankedBars(container, items, { unitNote }) {
-  const rowH = 22, padL = 150, padR = 58, padT = 8;
+  const { narrow, width } = geometry(container, 780);
+  // A row is also a hit target: 26 units, one pixel each, clears the 24px floor
+  // a finger needs. The label gutter is the first thing a phone cannot afford,
+  // so it shrinks and the names that no longer fit are clipped, with the full
+  // one on the label's own tooltip.
+  const rowH = narrow ? 26 : 22;
+  const padL = narrow ? 92 : 150;
+  const padR = narrow ? 46 : 58;
+  const padT = 8;
   const height = items.length * rowH + padT + 18;
-  const width = 780, plotW = width - padL - padR;
-  const { max } = niceScale(Math.max(...items.map((d) => d.value ?? 0), 1));
+  const plotW = width - padL - padR;
+  const { max } = niceScale(Math.max(...items.map((d) => d.value ?? 0), 1), narrow ? 2 : 4);
   const svg = el("svg", { viewBox: `0 0 ${width} ${height}`, role: "img" });
   const fills = {
     main: gradientFill(svg, `var(${SERIES_SLOTS[0]})`),
     alt: gradientFill(svg, `var(${SERIES_SLOTS[1]})`),
     ref: gradientFill(svg, "var(--ink-muted)"),
   };
+  // Ordered categories bring their own ramp step with them; one gradient per
+  // distinct colour, not per bar.
+  const ramp = {};
+  const rampFill = (color) => (ramp[color] ??= gradientFill(svg, color));
 
-  [0, 0.25, 0.5, 0.75, 1].forEach((t) => {
+  (narrow ? [0, 0.5, 1] : [0, 0.25, 0.5, 0.75, 1]).forEach((t) => {
     const x = padL + t * plotW;
     svg.appendChild(el("line", { x1: x, x2: x, y1: padT, y2: height - 18, class: "grid-line" }));
     svg.appendChild(el("text", {
       x, y: height - 4, class: "tick-label", "text-anchor": "middle",
-      text: `${+(t * max).toFixed(1)}%`,
+      text: `${narrow ? Math.round(t * max) : +(t * max).toFixed(1)}%`,
     }));
   });
+
+  // The gutter, less the 10 units of air before the bar starts.
+  const fitted = (d) => fitLabel(d.label, padL - 12);
+  const catLabel = (d, attrs) => {
+    const node = el("text", { ...attrs, text: fitted(d) });
+    if (fitted(d) !== d.label) {
+      node.classList.add("clipped");
+      node.appendChild(el("title", { text: d.label }));
+    }
+    return node;
+  };
 
   items.forEach((d, i) => {
     const y = padT + i * rowH;
     if (d.value === null || d.value === undefined) {
       // A dropped row reads as "we never asked"; a marked one reads as
       // "measured, then withheld", which is what actually happened.
-      svg.appendChild(el("text", {
+      svg.appendChild(catLabel(d, {
         x: padL - 10, y: y + rowH / 2 + 1, class: "cat-label missing",
-        "text-anchor": "end", text: d.label,
+        "text-anchor": "end",
       }));
       svg.appendChild(el("line", {
         x1: padL, x2: padL + 14, y1: y + rowH / 2 - 1, y2: y + rowH / 2 - 1,
@@ -459,19 +718,20 @@ function rankedBars(container, items, { unitNote }) {
     }
     const w = Math.max(2, (d.value / max) * plotW);
     const kind = d.reference ? "ref" : (d.alt ? "alt" : "main");
-    const solid = d.reference ? "var(--ink-muted)" : `var(${SERIES_SLOTS[d.alt ? 1 : 0]})`;
+    const solid = d.color ?? (d.reference ? "var(--ink-muted)" : `var(${SERIES_SLOTS[d.alt ? 1 : 0]})`);
     const lifted = d.highlight || d.reference;
     const bar = el("rect", {
       x: padL, y: y + 4, width: w, height: rowH - 10, rx: 4,
-      class: "bar-x", fill: fills[kind], "fill-opacity": lifted ? 1 : 0.4,
+      class: "bar-x", fill: d.color ? rampFill(d.color) : fills[kind],
+      "fill-opacity": lifted ? 1 : 0.4,
       style: `animation-delay:${Math.min(i * 3, 90)}ms`,
     });
     attachTip(bar, `<div class="tt-title">${d.label}</div>
       ${tipRow(solid, `${fmt(d.value)}%`)}<div class="tt-base">${unitNote}</div>`);
     svg.appendChild(bar);
-    svg.appendChild(el("text", {
+    svg.appendChild(catLabel(d, {
       x: padL - 10, y: y + rowH / 2 + 1, class: "cat-label", "text-anchor": "end",
-      "font-weight": lifted ? 600 : 400, text: d.label,
+      "font-weight": lifted ? 600 : 400,
     }));
     if (lifted) {
       svg.appendChild(el("text", {
@@ -484,9 +744,19 @@ function rankedBars(container, items, { unitNote }) {
 
 /** Grouped horizontal bars - one row per indicator, one bar per facet. */
 function groupedBars(container, categories, series, { unitNote }) {
-  const groupH = 22 + series.length * 16, padL = 292, padR = 62, padT = 8;
+  const { narrow, width } = geometry(container, 900);
+  // Eurostat's indicator names are sentences. A 292-unit gutter holds one; a
+  // phone has no such gutter to give, so the name moves onto its own line above
+  // the bars it belongs to and the bars take the full width underneath.
+  const barH = narrow ? 13 : 14;
+  const rowGap = narrow ? 15 : 16;
+  const labelBand = narrow ? 19 : 0;
+  const groupH = labelBand + (narrow ? 14 : 22) + series.length * rowGap;
+  const padL = narrow ? 0 : 292;
+  const padR = narrow ? 44 : 62;
+  const padT = 8;
   const height = categories.length * groupH + padT + 22;
-  const width = 900, plotW = width - padL - padR;
+  const plotW = width - padL - padR;
   const { max } = niceScale(Math.max(...series.flatMap((s) => s.values.map((v) => v ?? 0)), 1), 2);
   const svg = el("svg", { viewBox: `0 0 ${width} ${height}`, role: "img" });
   const fills = series.map((s) => gradientFill(svg, `var(${s.slot})`));
@@ -495,7 +765,10 @@ function groupedBars(container, categories, series, { unitNote }) {
     const x = padL + t * plotW;
     svg.appendChild(el("line", { x1: x, x2: x, y1: padT, y2: height - 22, class: "grid-line" }));
     svg.appendChild(el("text", {
-      x, y: height - 6, class: "tick-label", "text-anchor": "middle",
+      // With no label gutter the zero tick sits on the left edge, where a
+      // centred label would hang outside the box.
+      x, y: height - 6, class: "tick-label",
+      "text-anchor": narrow && t === 0 ? "start" : "middle",
       text: `${+(t * max).toFixed(1)}%`,
     }));
   });
@@ -512,9 +785,12 @@ function groupedBars(container, categories, series, { unitNote }) {
     // clipped, since a cursor change alone is invisible in a screenshot.
     // Not `short !== label`: shortLabel also strips Eurostat's shared sentence
     // stem, so the two differ on rows that were never clipped.
+    const text = narrow ? fitLabel(cat.short, plotW + padR - 6) : cat.short;
     const labelNode = el("text", {
-      x: padL - 14, y: top + groupH / 2, "text-anchor": "end", text: cat.short,
-      class: `cat-label${cat.short.endsWith("…") ? " clipped" : ""}`,
+      x: narrow ? 0 : padL - 14,
+      y: narrow ? top + 11 : top + groupH / 2,
+      "text-anchor": narrow ? "start" : "end", text,
+      class: `cat-label${text.endsWith("…") ? " clipped" : ""}`,
     });
     labelNode.appendChild(el("title", { text: cat.label }));
     attachTip(labelNode, tip, false);
@@ -522,13 +798,13 @@ function groupedBars(container, categories, series, { unitNote }) {
 
     series.forEach((s, j) => {
       const v = s.values[i];
-      const y = top + 9 + j * 16;
+      const y = top + labelBand + (narrow ? 1 : 9) + j * rowGap;
       if (v === null || v === undefined) {
         svg.appendChild(el("line", {
-          x1: padL, x2: padL + 14, y1: y + 7, y2: y + 7, class: "missing-rule",
+          x1: padL, x2: padL + 14, y1: y + barH / 2, y2: y + barH / 2, class: "missing-rule",
         }));
         const tag = el("text", {
-          x: padL + 20, y: y + 11, class: "value-label missing", text: NOT_PUBLISHED,
+          x: padL + 20, y: y + barH - 3, class: "value-label missing", text: NOT_PUBLISHED,
         });
         tag.appendChild(el("title", { text: MISSING_REASON }));
         svg.appendChild(tag);
@@ -537,13 +813,13 @@ function groupedBars(container, categories, series, { unitNote }) {
       // 2px surface gap between adjacent fills rather than a stroke around them.
       const w = Math.max(2, (v / max) * plotW);
       const bar = el("rect", {
-        x: padL, y, width: w, height: 14, rx: 4, fill: fills[j], class: "bar-x",
+        x: padL, y, width: w, height: barH, rx: 4, fill: fills[j], class: "bar-x",
         style: `animation-delay:${Math.min(i * 12 + j * 6, 90)}ms`,
       });
       attachTip(bar, tip);
       svg.appendChild(bar);
       svg.appendChild(el("text", {
-        x: padL + w + 8, y: y + 11, class: "value-label", text: `${fmt(v, 0)}%`,
+        x: padL + w + 8, y: y + barH - 3, class: "value-label", text: `${fmt(v, 0)}%`,
       }));
     });
   });
@@ -553,8 +829,14 @@ function groupedBars(container, categories, series, { unitNote }) {
 
 /** Multi-line trend. Endpoints are direct-labelled; no number on every point. */
 function lineChart(container, xs, series, { unitNote }) {
-  const padL = 46, padR = 132, padT = 16, padB = 30;
-  const width = 900, height = 320;
+  const { narrow, width } = geometry(container, 900);
+  // The endpoint labels keep their gutter on a phone but not their length: a
+  // series names itself in the legend directly underneath, so the label on the
+  // line only has to be enough to tell three lines apart.
+  const padL = narrow ? 38 : 46;
+  const padR = narrow ? 54 : 132;
+  const padT = 16, padB = 30;
+  const height = narrow ? 250 : 320;
   const plotW = width - padL - padR, plotH = height - padT - padB;
   const { max } = niceScale(Math.max(...series.flatMap((s) => s.points.map((p) => p.y ?? 0)), 10));
   const x = (i) => padL + (xs.length === 1 ? plotW / 2 : (i / (xs.length - 1)) * plotW);
@@ -564,9 +846,12 @@ function lineChart(container, xs, series, { unitNote }) {
   for (let t = 0; t <= 4; t++) {
     const gy = padT + (t / 4) * plotH;
     svg.appendChild(el("line", { x1: padL, x2: padL + plotW, y1: gy, y2: gy, class: "grid-line" }));
+    const tick = max - (t / 4) * max;
     svg.appendChild(el("text", {
+      // A decimal point costs six units of a gutter a phone does not have, and
+      // the tooltip carries the exact figure anyway.
       x: padL - 9, y: gy + 4, class: "tick-label", "text-anchor": "end",
-      text: `${+(max - (t / 4) * max).toFixed(1)}%`,
+      text: `${narrow ? Math.round(tick) : +tick.toFixed(1)}%`,
     }));
   }
   xs.forEach((xv, i) => svg.appendChild(el("text", {
@@ -603,15 +888,28 @@ function lineChart(container, xs, series, { unitNote }) {
         cx: x(i), cy: y(p.y), r: 4.5, fill: stroke,
         stroke: "var(--surface)", "stroke-width": 2,
       });
-      attachTip(dot, `<div class="tt-title">${xs[i]}</div>
+      const tip = `<div class="tt-title">${xs[i]}</div>
         ${series.map((o) => o.points[i]?.y === null || o.points[i] === undefined ? ""
           : tipRow(o.reference ? "var(--ink-muted)" : `var(${o.slot})`,
                    `${o.label}: ${fmt(o.points[i].y)}%`)).join("")}
-        <div class="tt-base">${unitNote}</div>`);
+        <div class="tt-base">${unitNote}</div>`;
+      attachTip(dot, tip);
       svg.appendChild(dot);
+      // A 9px dot is a fingertip's worth of nothing. On a phone an invisible
+      // 26px disc sits over it and carries the same tooltip.
+      if (narrow) {
+        const hit = el("circle", { cx: x(i), cy: y(p.y), r: 13, fill: "transparent" });
+        attachTip(hit, tip, false);
+        svg.appendChild(hit);
+      }
     });
     const last = s.points.map((p, i) => [p, i]).filter(([p]) => p.y !== null).pop();
-    if (last) endLabels.push({ x: x(last[1]) + 11, y: y(last[0].y) + 4, text: s.label, fill: stroke });
+    if (last) {
+      endLabels.push({
+        x: x(last[1]) + (narrow ? 7 : 11), y: y(last[0].y) + 4, fill: stroke,
+        text: narrow ? fitLabel(s.short ?? s.label, padR - 10) : s.label,
+      });
+    }
   });
 
   // Endpoint labels sit at the series' own height, which collides whenever two
@@ -710,6 +1008,9 @@ function card(parent, { title, note, warn, empty, draw, table }) {
 
   const chart = el("div", { class: "chart" });
   box.appendChild(chart);
+  // In the document before it is drawn, so the chart can measure the width it
+  // will actually occupy rather than assuming a desktop one.
+  parent.appendChild(box);
   draw(chart);
 
   let tableNode = null;
@@ -724,10 +1025,12 @@ function card(parent, { title, note, warn, empty, draw, table }) {
     box.appendChild(tableNode);
     toggle.textContent = "Hide data";
   });
-  parent.appendChild(box);
 }
 
 function renderTable({ columns, rows: body }) {
+  // The table is the relief for every chart, so it must survive a narrow card:
+  // it scrolls inside its own box rather than widening the page.
+  const scroller = el("div", { class: "table-scroll" });
   const t = el("table", { class: "data" });
   const headRow = el("tr");
   columns.forEach((c) => headRow.appendChild(el("th", { text: c })));
@@ -741,7 +1044,8 @@ function renderTable({ columns, rows: body }) {
     tbody.appendChild(tr);
   });
   t.appendChild(tbody);
-  return t;
+  scroller.appendChild(t);
+  return scroller;
 }
 
 /* --- absolute counts ----------------------------------------------------- */
@@ -767,11 +1071,14 @@ function compactCount(n) {
  */
 function absoluteCounts(chartId, indicator, f) {
   if (SERIES[chartId].weightable !== true) return null;
+  // Summing overlapping bands would count the same firms twice, and a count is
+  // the one figure on this page a reader is entitled to read as a count. The
+  // section removes itself rather than publishing a number that double-counts.
+  if (overlapInside(f.bands)) return null;
   const time = latestYear(chartId, { indicator });
   if (!time) return null;
-  const recs = where(chartId, {
-    indicator, [dim().field]: f.band, time, geo: f.geos,
-  }).filter((r) => typeof r.enterprise_count === "number" && r.enterprise_count > 0);
+  const recs = cellsOf(chartId, indicator, f, time)
+    .filter((r) => typeof r.enterprise_count === "number" && r.enterprise_count > 0);
   if (!recs.length) return null;
   const total = recs.reduce((a, r) => a + r.enterprise_count, 0);
   const doing = recs.reduce((a, r) => a + r.enterprise_count * r.value / 100, 0);
@@ -791,7 +1098,7 @@ function countsCard(root, { chartId, indicator, title, note }) {
     node.appendChild(el("div", { class: "sub", text: sub }));
     return node;
   };
-  const who = `${dim().labelOf(f.band)} · ${geosLabel(f.geos)}, ${c.time}`;
+  const who = `${bandsLabel(f.bands)} · ${geosLabel(f.geos)}, ${c.time}`;
   tiles.appendChild(tile("Businesses of this size", compactCount(c.total), who));
   tiles.appendChild(tile("Using AI", compactCount(c.doing), who, SERIES_SLOTS[0]));
   tiles.appendChild(tile("Not using AI", compactCount(c.missing), who, SERIES_SLOTS[1]));
@@ -806,9 +1113,7 @@ function countsCard(root, { chartId, indicator, title, note }) {
 function headlineTiles(root, { chartId, indicator }) {
   const year = latestYear(chartId, { indicator });
   const fs = facets();
-  const ref = where(chartId, {
-    indicator, [dim().field]: sel().band, time: year, geo: REF_GEO,
-  })[0];
+  const ref = euValueAt(chartId, indicator, year);
 
   const tiles = el("div", { class: "tiles" });
   const tile = (k, v, sub, cls, accent) => {
@@ -839,37 +1144,37 @@ function headlineTiles(root, { chartId, indicator }) {
     : multiple ? `${fs[1].label} vs ${fs[0].label}`
     : "A gap needs a published figure on both sides.";
   tiles.appendChild(tile("The gap", multiple ? `${multiple.toFixed(1)}x` : "—", gapSub));
-  tiles.appendChild(tile("EU27 benchmark", `${fmt(ref?.value)}%`,
-    `Eurostat's published aggregate · ${dim().labelOf(sel().band)}`));
+  tiles.appendChild(tile("EU27 benchmark", `${fmt(ref)}%`,
+    `Eurostat's published aggregate · ${bandsLabel(sel().bands)}`));
   root.appendChild(tiles);
 
-  // Either side of the comparison can be a group of countries, and each side
-  // decides its own weighting, so the note is built per side rather than
-  // assuming the primary selection speaks for both.
-  // Either side can be a group, and each decides its own weighting - but when
-  // both land on the same method, saying so twice is noise.
-  const groups = fs.filter((f) => f.geos.length > 1);
-  const messages = new Set(groups.map((f) => {
-    const w = weightingMode(chartId, indicator, f, [year]);
-    return facetStat(chartId, indicator, f, year, w)?.weighted
-      ? "Countries are combined the way Eurostat builds EU27 — weighted by how many enterprises each has, not a plain average of the countries."
-      : "Countries are combined as a plain average, each counting equally. No enterprise counts exist for this measure or year, so they cannot be weighted the way EU27 is.";
-  }));
-  messages.forEach((text) => root.appendChild(el("p", { class: "card-warn", text })));
+  // Either side of the comparison can be a group - of countries, of bands, or
+  // of both - and each side decides its own weighting, so the note is built per
+  // side rather than assuming the primary selection speaks for both.
+  const method = weightingNote(chartId, indicator, fs, [year]);
+  if (method) root.appendChild(el("p", { class: "card-warn", text: method }));
+  if (sel().bands.length > 1) {
+    const euWeighted = weightingMode(chartId, indicator, euFacet(), [year]);
+    root.appendChild(el("p", { class: "card-warn", text:
+      "The EU27 benchmark combines Eurostat's own published figure for each selected "
+      + `${dim().noun}, ${euWeighted ? "weighted by EU27's own counts" : "as a plain average"}.`
+      + " It is never an average of the member states, and with a single band selected it is"
+      + " shown exactly as published." }));
+  }
+  const overlap = overlapWarning();
+  if (overlap) root.appendChild(el("p", { class: "card-warn", text: overlap }));
 }
 
 function trendCard(root, { chartId, indicator, title, note }) {
-  const d = dim();
   const unitNote = unitNoteFor(SERIES[chartId].unit);
   const xs = yearsOf(chartId, { indicator });
   const fs = facets();
-  const eu = (t) => where(chartId, {
-    indicator, [d.field]: sel().band, time: t, geo: REF_GEO,
-  })[0]?.value ?? null;
+  const eu = (t) => euValueAt(chartId, indicator, t, xs);
 
   card(root, {
     title: `${title} — ${heldConstant()}`,
-    note, warn: overlapWarning(),
+    note: [note, weightingNote(chartId, indicator, fs, xs)].filter(Boolean).join(" "),
+    warn: overlapWarning(),
     draw: (c) => lineChart(c, xs, [
       ...fs.map((f) => {
         const w = weightingMode(chartId, indicator, f, xs);
@@ -878,7 +1183,7 @@ function trendCard(root, { chartId, indicator, title, note }) {
           points: xs.map((t) => ({ y: facetValue(chartId, indicator, f, t, w) })),
         };
       }),
-      { label: `EU27 · ${d.labelOf(sel().band)}`, reference: true,
+      { label: `EU27 · ${bandsLabel(sel().bands)}`, short: "EU27", reference: true,
         points: xs.map((t) => ({ y: eu(t) })) },
     ], { unitNote }),
     table: () => ({
@@ -895,9 +1200,17 @@ function rankingCard(root, { chartId, indicator, title, note }) {
   const s = sel();
   const unitNote = unitNoteFor(SERIES[chartId].unit);
   const year = latestYear(chartId, { indicator });
-  const present = where(chartId, { indicator, [d.field]: s.band, time: year });
+  const present = where(chartId, { indicator, [d.field]: s.bands, time: year });
   const have = new Set(present.map((r) => r.geo));
   const mine = [...state.geos, ...(s.compareMode === "geo" ? s.compareGeos : []), REF_GEO];
+
+  // One bar per country, each its own weighted average over the selected bands
+  // - the ranking varies the country, so the bands are what gets combined.
+  const valueOf = (geo) => {
+    const f = { geos: [geo], bands: s.bands };
+    return facetValue(chartId, indicator, f, year,
+      weightingMode(chartId, indicator, f, [year]));
+  };
 
   // Countries the reader actually chose appear even when Eurostat publishes
   // nothing for them - their absence is the finding. Everyone else is counted
@@ -915,7 +1228,7 @@ function rankingCard(root, { chartId, indicator, title, note }) {
   });
 
   const build = () => [
-    ...present.map((r) => decorate(r.geo, r.value)),
+    ...[...have].map((geo) => decorate(geo, valueOf(geo))),
     ...missingMine.map((g) => decorate(g, null)),
   ].sort((a, b) => (b.value ?? -1) - (a.value ?? -1));
 
@@ -923,9 +1236,16 @@ function rankingCard(root, { chartId, indicator, title, note }) {
   if (othersMissing) {
     notes.push(`${othersMissing} further ${othersMissing === 1 ? "country does" : "countries do"} not publish this figure and are left out of the ranking.`);
   }
+  if (s.bands.length > 1) {
+    const weighted = weightingMode(chartId, indicator,
+      { geos: [state.geos[0]], bands: s.bands }, [year]);
+    notes.push(`Each bar combines the selected ${d.noun}s`
+      + (weighted ? ", weighted by how many that country holds in each." : " as a plain average.")
+      + " A country that publishes only some of them is averaged over the ones it publishes.");
+  }
 
   card(root, {
-    title: `${title} — ${d.labelOf(s.band)}, ${year}`,
+    title: `${title} — ${bandsLabel(s.bands)}, ${year}`,
     note: notes.filter(Boolean).join(" "),
     draw: (c) => rankedBars(c, build(), { unitNote }),
     table: () => ({ columns: ["Country", "%"], rows: build().map((x) => [x.label, fmt(x.value)]) }),
@@ -933,7 +1253,6 @@ function rankingCard(root, { chartId, indicator, title, note }) {
 }
 
 function comparisonCard(root, chartId, { title, note, indicators }) {
-  const d = dim();
   const chart = SERIES[chartId];
   const unitNote = unitNoteFor(chart.unit);
   const codes = indicators || chart.indicators;
@@ -957,9 +1276,7 @@ function comparisonCard(root, chartId, { title, note, indicators }) {
   // country, making two screenshots impossible to compare; the aggregate keeps
   // the running order fixed while the bars move. Anything EU27 does not report
   // sorts last rather than to the top on a null.
-  const euValue = (code) => where(chartId, {
-    indicator: code, [d.field]: sel().band, time: year, geo: REF_GEO,
-  })[0]?.value ?? -1;
+  const euValue = (code) => euValueAt(chartId, code, year) ?? -1;
   categories.sort((a, b) => euValue(b.code) - euValue(a.code));
 
   const series = fs.map((f) => ({
@@ -976,8 +1293,11 @@ function comparisonCard(root, chartId, { title, note, indicators }) {
       : `Eurostat publishes none of these figures for ${heldConstant()} in ${year}. ${MISSING_REASON} Not every country takes part in every part of the survey.`,
     note: [
       note,
-      `Rows are ordered by the EU27 figure for ${d.labelOf(sel().band)}, so changing the selection moves the bars but never the row order.`,
+      `Rows are ordered by the EU27 figure for ${bandsLabel(sel().bands)}, so changing the selection moves the bars but never the row order.`,
       gaps.length ? `${gaps.length} row${gaps.length === 1 ? " is" : "s are"} missing a figure on one side. ${MISSING_REASON}` : null,
+      // Read off the first row that actually has figures: an indicator with no
+      // data would report the fallback method rather than the one in use.
+      categories.length ? weightingNote(chartId, categories[0].code, fs, [year]) : null,
     ].filter(Boolean).join(" "),
     warn: overlapWarning(),
     draw: (c) => groupedBars(c, categories, series, { unitNote }),
@@ -1000,16 +1320,17 @@ function breakdownRankCard(root, { chartId, indicator, title, note }) {
   const unitNote = unitNoteFor(SERIES[chartId].unit);
   const year = latestYear(chartId, { indicator });
   const fs = facets();
-  const picked = fs.map((f) => f.band);
+  const picked = fs.flatMap((f) => f.bands);
 
   const build = () => d.options.map((code) => {
-    const f = { geos: state.geos, band: code };
+    const f = { geos: state.geos, bands: [code] };
     return {
       code, label: d.labelOf(code),
       value: facetValue(chartId, indicator, f, year,
         weightingMode(chartId, indicator, f, [year])),
       highlight: picked.includes(code),
-      alt: picked.indexOf(code) === 1,
+      // The comparison colour belongs to whatever is only on the second side.
+      alt: fs.length > 1 && fs[1].bands.includes(code) && !fs[0].bands.includes(code),
     };
   }).sort((a, b) => (b.value ?? -1) - (a.value ?? -1));
 
@@ -1031,20 +1352,36 @@ function ordinalCard(root, { chartId, indicator, options, title, note, kindLabel
   const d = dim();
   const unitNote = unitNoteFor(SERIES[chartId].unit);
   const year = latestYear(chartId, { indicator });
-  const items = options.map((code) => ({
-    code, label: d.labelOf(code),
-    value: aggregateValues(
-      where(chartId, { indicator, [d.field]: code, time: year, geo: state.geos }),
-      weightingMode(chartId, indicator, { geos: state.geos, band: code }, [year]),
-    )?.value ?? null,
-  }));
-  const picked = facets().filter((f) => options.includes(f.band)).map((f) => f.band);
+  const items = options.map((code) => {
+    const f = { geos: state.geos, bands: [code] };
+    return {
+      code, label: d.labelOf(code),
+      value: facetValue(chartId, indicator, f, year,
+        weightingMode(chartId, indicator, f, [year])),
+    };
+  });
+  const picked = facets().flatMap((f) => f.bands).filter((c) => options.includes(c));
 
   card(root, {
     title: `${title} — ${geosLabel(state.geos)}, ${year}`,
     note: [note, missingNote(items.filter((x) => x.value === null).map((x) => x.label))]
       .filter(Boolean).join(" "),
-    draw: (c) => ordinalBars(c, items, { unitNote, highlight: picked }),
+    // Six upright bars need six label slots along the bottom, and a phone has
+    // room for about three. Turned on its side each label gets a whole line, so
+    // a narrow screen gets the ranked layout carrying the ordinal ramp with it -
+    // the ordering survives as top-to-bottom instead of left-to-right.
+    draw: (c) => {
+      if (!geometry(c, 900).narrow) {
+        ordinalBars(c, items, { unitNote, highlight: picked });
+        return;
+      }
+      const anyPicked = items.some((x) => picked.includes(x.code));
+      rankedBars(c, items.map((x, i) => ({
+        ...x,
+        color: `var(${ORDINAL_SLOTS[Math.min(i, ORDINAL_SLOTS.length - 1)]})`,
+        highlight: !anyPicked || picked.includes(x.code),
+      })), { unitNote });
+    },
     table: () => ({
       columns: [kindLabel, "%"], rows: items.map((x) => [x.label, fmt(x.value)]),
     }),
@@ -1062,8 +1399,12 @@ const PLAIN_NOTES = [
    "The EU survey behind these numbers only reaches companies with 10 employees or more. Businesses smaller than that — which are the majority of firms in Europe — are never asked. So wherever this page says \"small firms\", it means 10 to 49 employees, not the corner shop."],
   ["Not every percentage is out of the same group",
    "Most figures here are a share of all companies. The \"why firms stay out\" figures are a share of only those companies that actually looked at AI and decided against it. Two numbers that both read 40% can therefore mean quite different things — each chart says underneath which group it is counting."],
-  ["Size groups overlap, so never add them together",
-   "\"10 to 249 employees\" already contains \"10 to 49\". Adding the two would count the same companies twice. That is why the page warns you when you compare a group against one it contains."],
+  ["Groups overlap, so never add them together",
+   "\"10 to 249 employees\" already contains \"10 to 49\", and \"all individuals\" contains every age band. Adding the two would count the same people or companies twice. That is why the page warns you when you compare a group against one it contains — and when you select two overlapping bands into the same group, where the double-counting would sit inside a single number."],
+  ["Several countries are combined by weight, not by vote",
+   "Select three countries and the page reports one figure for the lot. It builds that figure the way Eurostat builds its EU27 aggregate: each country counts in proportion to how many businesses it has, so Germany does not weigh the same as Malta. Where the business register does not reach the survey's newest year, the nearest year's counts are used rather than dropping the whole series to a plain average."],
+  ["Several age bands are combined as a plain average",
+   "In the Individuals view you can select several age bands and read them as one group. Eurostat publishes those figures as percentages of people with no population count beside them, so the bands can only be averaged equally — a group of \"16-24 and 25-34\" treats the two as the same size, when in most countries the older band holds more people. It is close enough to compare against another group built the same way, and not exact enough to quote as the figure for everyone aged 16 to 34. Each chart says so underneath."],
   ["One company can appear in several bars",
    "A firm using AI for marketing, logistics and finance is counted in all three bars. The bars answer \"how many do this?\", not \"how do they split up?\", so they will not add to 100%."],
   ["The EU27 line is Eurostat's, not an average of what you picked",
@@ -1111,7 +1452,7 @@ function renderMethodology(root) {
 
 const HOW_TO_READ = {
   id: "method", part: "Reading it", nav: "How to read this", h2: "How to read this",
-  deck: "Eight things that change what these numbers mean. They are worth two minutes before you quote any figure from this page.",
+  deck: "Ten things that change what these numbers mean. They are worth two minutes before you quote any figure from this page.",
   render: renderMethodology,
 };
 
@@ -1135,7 +1476,7 @@ const orderedSections = (sections) => [...sections]
 const VIEWS = {
   firm: {
     headline: "Europe's small firms are falling behind on AI",
-    standfirst: "Eurostat's enterprise ICT surveys, read by firm size. Pick a country and a size band, then choose whether to compare it against another size band or against another country.",
+    standfirst: "Eurostat's enterprise ICT surveys, read by firm size. Pick a size band and one or more countries — several countries combine into a single figure, weighted by how many businesses each has — then choose whether to compare it against another size band or against other countries.",
     unitKey: "firm_level",
     sections: [
       { id: "gap", part: "The scale", nav: "The gap", h2: "The gap, in one number",
@@ -1243,7 +1584,7 @@ const VIEWS = {
 
   individual: {
     headline: "The workforce Europe's SMEs hire from",
-    standfirst: "Eurostat's household ICT survey — people, not companies. Age bands work exactly as size bands do in the Companies view: pick one, then compare it against another age band or against another country.",
+    standfirst: "Eurostat's household ICT survey — people, not companies. Pick as many age bands as you like and they combine into one group, so you can read \"everyone under 45\" or \"the cohort about to retire\" rather than one band at a time, then compare that group against other bands or against other countries.",
     unitKey: "individual_level",
     sections: [
       { id: "age-gap", part: "The scale", nav: "The age gap", h2: "The gap, in one number",
@@ -1310,16 +1651,27 @@ const VIEWS = {
   },
 };
 
-/* --- country picker ----------------------------------------------------- */
+/* --- multi-select picker ------------------------------------------------- */
 
 /**
- * A searchable single-select. A native <select> over 34 countries cannot show
- * the colour a country carries in the charts, and cannot be typed into.
+ * A multi-select the native <select> cannot be.
+ *
+ * Built for countries first - 34 of them, needing search and a badge a native
+ * control cannot carry - and now shared with the size bands, which need the
+ * same thing for a different reason: several bands combine into one group, and
+ * a <select> can only hold one. The differences between the two are all
+ * configuration: whether there is a search box, whether "select all" is on
+ * offer (it is not for bands, where selecting every band would combine groups
+ * that contain one another), and how a selection names itself.
  */
-function countryPicker(host, { options, selected, onToggle, onSelectAll, hint }) {
+function optionPicker(host, {
+  buttonId, options, selected, onToggle, onSelectAll, hint, summarize,
+  labelOf, badgeOf, order = (list) => list, keepOrder = false, maxBadges = 3,
+  searchable = true, searchPlaceholder = "Search…", allLabel,
+}) {
   host.innerHTML = "";
   const button = el("button", {
-    class: "dd-button", type: "button", id: "dd-geo-button",
+    class: "dd-button", type: "button", id: buttonId,
     "aria-haspopup": "listbox", "aria-expanded": "false",
   });
   const badges = el("span", { class: "dd-badges" });
@@ -1330,45 +1682,44 @@ function countryPicker(host, { options, selected, onToggle, onSelectAll, hint })
 
   const panel = el("div", { class: "dd-panel", role: "listbox", hidden: "" });
   const search = el("input", {
-    class: "dd-search", type: "search", placeholder: "Search countries…",
+    class: "dd-search", type: "search", placeholder: searchPlaceholder,
   });
   const list = el("div", { class: "dd-list" });
   const foot = el("p", { class: "dd-foot" });
-  panel.appendChild(search);
+  if (searchable) panel.appendChild(search);
   panel.appendChild(list);
   panel.appendChild(foot);
   host.appendChild(button);
   host.appendChild(panel);
 
   function paintButton() {
-    const picked = homeFirst(selected());
-    // Three badges is what fits the button; past that the count carries it.
+    const picked = order(selected());
+    // Only so many badges fit the button; past that the count carries it, and
+    // a wide badge ("50–249") runs out of room sooner than a country code.
     badges.innerHTML = "";
-    picked.slice(0, 3).forEach((code) => badges.appendChild(
-      el("span", { class: "geo-badge", text: geoBadge(code) })));
-    value.textContent = picked.length === 1
-      ? label("geo", picked[0])
-      : `${picked.length} countries`;
+    picked.slice(0, maxBadges).forEach((code) => badges.appendChild(
+      el("span", { class: "geo-badge", text: badgeOf(code) })));
+    value.textContent = picked.length === 1 ? labelOf(picked[0]) : summarize(picked);
     foot.textContent = picked.length === 1
       ? hint
       : `${picked.length} selected · combined into one averaged series.`;
   }
 
   function paintList() {
-    const q = search.value.trim().toLowerCase();
+    const q = searchable ? search.value.trim().toLowerCase() : "";
     const picked = selected();
     list.innerHTML = "";
 
-    // "All countries" leads the list, but only when nothing is being searched -
+    // "Select all" leads the list, but only when nothing is being searched -
     // offering it beside three filtered results would not mean what it says.
-    if (!q) {
+    if (!q && onSelectAll) {
       const every = options().every((c) => picked.includes(c));
       const all = el("button", {
         class: "dd-option dd-all", type: "button", role: "option",
         "aria-selected": String(every),
       });
       all.appendChild(el("span", { class: "geo-badge", text: "ALL" }));
-      all.appendChild(el("span", { text: every ? `All ${options().length} countries` : "Select all countries" }));
+      all.appendChild(el("span", { text: allLabel(options().length, every) }));
       if (every) all.appendChild(el("span", { class: "dd-check", text: "✓" }));
       all.addEventListener("click", () => {
         onSelectAll(every);
@@ -1378,28 +1729,33 @@ function countryPicker(host, { options, selected, onToggle, onSelectAll, hint })
       list.appendChild(all);
     }
 
-    options()
-      .filter((code) => !q || label("geo", code).toLowerCase().includes(q)
-        || geoBadge(code).toLowerCase().startsWith(q))
-      // Selected countries lead the list, so a shared link shows its selection
-      // without the reader having to scroll for it.
-      .sort((a, b) => (picked.includes(b) - picked.includes(a))
-        || label("geo", a).localeCompare(label("geo", b)))
-      .forEach((code) => {
-        const on = picked.includes(code);
-        const opt = el("button", {
-          class: "dd-option", type: "button", role: "option", "aria-selected": String(on),
-        });
-        opt.appendChild(el("span", { class: "geo-badge", text: geoBadge(code) }));
-        opt.appendChild(el("span", { text: label("geo", code) }));
-        if (on) opt.appendChild(el("span", { class: "dd-check", text: "✓" }));
-        opt.addEventListener("click", () => {
-          onToggle(code);
-          paintButton();
-          paintList();
-        });
-        list.appendChild(opt);
+    const shown = options()
+      .filter((code) => !q || labelOf(code).toLowerCase().includes(q)
+        || badgeOf(code).toLowerCase().startsWith(q));
+    // Selected options lead the list, so a shared link shows its selection
+    // without the reader having to scroll for it - except where the options
+    // carry their own order, as size bands do, and reshuffling them by what
+    // happens to be selected would cost more than it saves.
+    if (!keepOrder) {
+      shown.sort((a, b) => (picked.includes(b) - picked.includes(a))
+        || labelOf(a).localeCompare(labelOf(b)));
+    }
+
+    shown.forEach((code) => {
+      const on = picked.includes(code);
+      const opt = el("button", {
+        class: "dd-option", type: "button", role: "option", "aria-selected": String(on),
       });
+      opt.appendChild(el("span", { class: "geo-badge", text: badgeOf(code) }));
+      opt.appendChild(el("span", { text: labelOf(code) }));
+      if (on) opt.appendChild(el("span", { class: "dd-check", text: "✓" }));
+      opt.addEventListener("click", () => {
+        onToggle(code);
+        paintButton();
+        paintList();
+      });
+      list.appendChild(opt);
+    });
   }
 
   const close = () => { panel.hidden = true; button.setAttribute("aria-expanded", "false"); };
@@ -1407,7 +1763,11 @@ function countryPicker(host, { options, selected, onToggle, onSelectAll, hint })
     e.stopPropagation();
     panel.hidden = !panel.hidden;
     button.setAttribute("aria-expanded", String(!panel.hidden));
-    if (!panel.hidden) { search.value = ""; paintList(); search.focus(); }
+    if (!panel.hidden) {
+      search.value = "";
+      paintList();
+      if (searchable) search.focus();
+    }
   });
   panel.addEventListener("click", (e) => e.stopPropagation());
   search.addEventListener("input", paintList);
@@ -1440,33 +1800,51 @@ function renderAll() {
   banner.appendChild(document.createTextNode(
     ` ${view.unitNote ?? META.tables[view.unitKey].unit_of_observation}`));
 
-  document.getElementById("lbl-primary").textContent = d.control;
+  // A dimension that can hold several values at once gets the picker; one that
+  // cannot keeps the native select, which is lighter and needs no explaining.
+  // Both controls exist in the markup and take turns, so the label's `for`
+  // has to follow whichever is showing.
+  const primaryLabel = document.getElementById("lbl-primary");
+  primaryLabel.textContent = d.multi ? `${d.control}s` : d.control;
+  primaryLabel.setAttribute("for", d.multi ? "dd-primary-button" : "primary-select");
   document.getElementById("opt-mode-band").textContent = d.control;
 
   const primarySel = document.getElementById("primary-select");
-  primarySel.innerHTML = "";
-  d.options.forEach((code) => primarySel.appendChild(
-    el("option", { value: code, text: d.labelOf(code) })));
-  primarySel.value = s.band;
+  const primaryPick = document.getElementById("dd-primary");
+  primarySel.hidden = d.multi;
+  primaryPick.hidden = !d.multi;
+  if (!d.multi) {
+    primarySel.innerHTML = "";
+    d.options.forEach((code) => primarySel.appendChild(
+      el("option", { value: code, text: d.labelOf(code) })));
+    primarySel.value = s.bands[0];
+  }
 
   document.getElementById("compare-mode").value = s.compareMode;
 
-  // The comparison list is either the other bands or the other countries -
-  // whichever dimension the reader chose to vary.
+  // The comparison is either the other bands or the other countries - whichever
+  // dimension the reader chose to vary - and the band side takes the same
+  // picker-or-select turn the primary control does.
   const cmpSel = document.getElementById("compare-select");
-  const cmpPick = document.getElementById("dd-compare");
+  const cmpBandPick = document.getElementById("dd-compare-band");
+  const cmpGeoPick = document.getElementById("dd-compare");
   const byBand = s.compareMode === "band";
-  cmpSel.hidden = !byBand;
-  cmpPick.hidden = byBand;
-  if (byBand) {
+  cmpSel.hidden = !byBand || d.multi;
+  cmpBandPick.hidden = !byBand || !d.multi;
+  cmpGeoPick.hidden = byBand;
+  document.getElementById("lbl-compare").setAttribute("for",
+    byBand ? (d.multi ? "dd-compare-band-button" : "compare-select") : "dd-compare-button");
+  if (byBand && !d.multi) {
     cmpSel.innerHTML = "";
     d.options.forEach((code) => cmpSel.appendChild(
       el("option", { value: code, text: d.labelOf(code) })));
-    cmpSel.value = s.compareBand;
+    cmpSel.value = s.compareBands[0];
   }
 
   geoPicker?.paint();
   comparePicker?.paint();
+  primaryPicker?.paint();
+  compareBandPicker?.paint();
 
   const host = document.getElementById("sections");
   host.innerHTML = "";
@@ -1526,26 +1904,72 @@ function observeSections() {
 
 let geoPicker = null;
 let comparePicker = null;
+let primaryPicker = null;
+let compareBandPicker = null;
 
 const geoOptions = () => [...new Set(rows("ai_adoption").map((r) => r.geo))]
   .filter((g) => g !== REF_GEO)
   .sort((a, b) => label("geo", a).localeCompare(label("geo", b)));
 
-/** Toggle a code in a list, refusing to empty it - a side with no country
- *  would leave the chart with nothing to draw. */
-function toggleIn(list, code) {
+/** Toggle a code in a list, refusing to empty it - a side with nothing selected
+ *  would leave the chart with nothing to draw. `order` keeps the selection in
+ *  the dimension's own order rather than the order it was clicked. */
+function toggleIn(list, code, order) {
   const i = list.indexOf(code);
   if (i >= 0) {
     if (list.length === 1) return;
     list.splice(i, 1);
   } else {
     list.push(code);
+    if (order) list.sort((a, b) => order.indexOf(a) - order.indexOf(b));
   }
   commit();
 }
 
+/** Shared configuration for the two country pickers. */
+const GEO_PICKER = {
+  labelOf: (code) => label("geo", code),
+  badgeOf: geoBadge,
+  order: homeFirst,
+  summarize: (picked) => `${picked.length} countries`,
+  searchPlaceholder: "Search countries…",
+  allLabel: (n, every) => (every ? `All ${n} countries` : "Select all countries"),
+};
+
+/**
+ * Shared configuration for the two band pickers.
+ *
+ * No "select all": the bands are not a partition, so selecting every one of
+ * them would build a group holding the same businesses several times over.
+ * Whatever is selected on the other side is off the list for the same reason
+ * countries are - a side cannot be compared against itself.
+ */
+const bandPicker = (host, which) => optionPicker(host, {
+  buttonId: `dd-${which}-button`,
+  options: () => {
+    const s = sel();
+    const taken = s.compareMode !== "band" ? []
+      : (which === "primary" ? s.compareBands : s.bands);
+    return dim().options.filter((c) => !taken.includes(c));
+  },
+  selected: () => (which === "primary" ? sel().bands : sel().compareBands),
+  onToggle: (code) => toggleIn(
+    which === "primary" ? sel().bands : sel().compareBands, code, dim().options),
+  labelOf: (code) => dim().labelOf(code),
+  badgeOf: (code) => dim().badgeOf(code),
+  summarize: (picked) => `${picked.length} ${dim().noun}s`,
+  hint: which === "primary"
+    ? "Pick more to combine them into one group."
+    : "Pick more to compare against their combined figure.",
+  keepOrder: true,
+  searchable: false,
+  maxBadges: 2,
+});
+
 function buildControls() {
-  geoPicker = countryPicker(document.getElementById("dd-geo"), {
+  geoPicker = optionPicker(document.getElementById("dd-geo"), {
+    ...GEO_PICKER,
+    buttonId: "dd-geo-button",
     // When the comparison is itself a set of countries, a country can only sit
     // on one side of it; offering it on both invites a group to be compared
     // against a group that partly contains it.
@@ -1563,7 +1987,9 @@ function buildControls() {
     },
   });
 
-  comparePicker = countryPicker(document.getElementById("dd-compare"), {
+  comparePicker = optionPicker(document.getElementById("dd-compare"), {
+    ...GEO_PICKER,
+    buttonId: "dd-compare-button",
     options: () => geoOptions().filter((g) => !state.geos.includes(g)),
     selected: () => sel().compareGeos,
     hint: "Pick more to compare against their combined average.",
@@ -1577,14 +2003,17 @@ function buildControls() {
     },
   });
 
+  primaryPicker = bandPicker(document.getElementById("dd-primary"), "primary");
+  compareBandPicker = bandPicker(document.getElementById("dd-compare-band"), "compare-band");
+
   document.getElementById("primary-select").addEventListener("change", (e) => {
-    sel().band = e.target.value; commit();
+    sel().bands = [e.target.value]; commit();
   });
   document.getElementById("compare-mode").addEventListener("change", (e) => {
     sel().compareMode = e.target.value; commit();
   });
   document.getElementById("compare-select").addEventListener("change", (e) => {
-    sel().compareBand = e.target.value;
+    sel().compareBands = [e.target.value];
     commit();
   });
 
@@ -1608,28 +2037,61 @@ function syncViewSwitch() {
 
 const commit = () => { syncUrl(); renderAll(); };
 
+/**
+ * Charts are drawn at the width they had when they were drawn, so a window that
+ * changes width - a rotated phone, a dragged desktop window - has to redraw
+ * them. Only when the width actually moved enough to matter: a mobile browser
+ * fires resize every time its address bar slides away, and redrawing thirteen
+ * charts on a scroll gesture is how a page starts to feel broken.
+ */
+function watchWidth() {
+  const contentWidth = () =>
+    document.getElementById("sections").getBoundingClientRect().width;
+  let last = contentWidth();
+  let timer = null;
+  window.addEventListener("resize", () => {
+    const now = contentWidth();
+    const crossed = (last < NARROW_AT) !== (now < NARROW_AT);
+    if (!crossed && Math.abs(now - last) < 48) return;
+    last = now;
+    clearTimeout(timer);
+    timer = setTimeout(renderAll, 150);
+  });
+}
+
 function syncUrl() {
   const s = sel();
   const params = new URLSearchParams();
   params.set("view", state.view);
   params.set("geo", state.geos.join(","));
-  params.set("band", s.band);
+  params.set("band", s.bands.join(","));
   params.set("by", s.compareMode);
-  params.set("vs", s.compareMode === "band" ? s.compareBand : s.compareGeos.join(","));
+  params.set("vs", s.compareMode === "band"
+    ? s.compareBands.join(",") : s.compareGeos.join(","));
   history.replaceState(null, "", `?${params}`);
 }
 
 function readUrl() {
   const p = new URLSearchParams(location.search);
   if (VIEWS[p.get("view")]) state.view = p.get("view");
-  const s = sel(), opts = DIMENSIONS[state.view].options;
+  const s = sel(), d = DIMENSIONS[state.view], opts = d.options;
   const geos = (p.get("geo") || "").split(",")
     .filter((g) => LABELS.geo[g] && g !== REF_GEO);
   if (geos.length) state.geos = geos;
-  if (opts.includes(p.get("band"))) s.band = p.get("band");
+  // A link can name several bands; a dimension that is single-select keeps the
+  // first of them rather than a selection its control could not display.
+  const codes = (param) => {
+    const list = (p.get(param) || "").split(",").filter((c) => opts.includes(c));
+    return list.length ? (d.multi ? list : [list[0]]) : null;
+  };
+  const bands = codes("band");
+  if (bands) s.bands = bands;
   if (p.get("by") === "band" || p.get("by") === "geo") s.compareMode = p.get("by");
   const vs = p.get("vs");
-  if (s.compareMode === "band" && opts.includes(vs)) s.compareBand = vs;
+  if (s.compareMode === "band") {
+    const compare = codes("vs");
+    if (compare) s.compareBands = compare;
+  }
   if (s.compareMode === "geo" && vs) {
     const list = vs.split(",").filter((g) => LABELS.geo[g] && g !== REF_GEO
       && !state.geos.includes(g));
@@ -1646,6 +2108,7 @@ async function boot() {
       return r.json();
     })));
   SERIES = series; LABELS = labels; META = meta;
+  buildWeights();
 
   tooltip.className = "tooltip";
   document.body.appendChild(tooltip);
@@ -1656,6 +2119,7 @@ async function boot() {
 
   buildControls();
   renderAll();
+  watchWidth();
 
   document.getElementById("generated").textContent =
     `Data generated ${META.generated_utc.slice(0, 10)} from Eurostat.`;

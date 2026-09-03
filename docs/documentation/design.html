@@ -97,7 +97,9 @@ docs/index.html + app.js + style.css             GitHub Pages</code></pre>
     size bands invert — because most firms never considered AI and so answered
     nothing. Read as a share of firms that <em>did</em> consider it, the same answer
     is 59%. The second is the real figure; the first is an artefact of the denominator.
-    Because that base is not the enterprise population, those figures are never weighted.
+    Eurostat never publishes the size of that base, so a group of them is weighted by
+    how many businesses each part holds in total — the group's size, not its exact
+    denominator — and the card says so rather than letting it pass as exact.
   </p>
 </div>
 
@@ -110,13 +112,21 @@ docs/index.html + app.js + style.css             GitHub Pages</code></pre>
 </div>
 
 <div class="rule">
-  <h4>Multi-country groups are weighted the way EU27 is</h4>
+  <h4>A group is weighted wherever a count for it exists</h4>
   <p>
     Selecting several countries combines them weighted by how many enterprises each
     has. Checked against Eurostat: all 32 reporters, small firms, 2024, ICT
     recruitment — weighted <strong>6.50%</strong> against Eurostat's published
     <strong>6.23%</strong>, where a plain average gives <strong>7.31%</strong>. The
     residual is the six non-EU reporters the EU27 aggregate excludes.
+  </p>
+  <p>
+    A selection is the cross product of its countries and its bands, and every cell in it
+    is weighted wherever a count exists for all of them. Age bands are the exception the
+    page states out loud: the household survey publishes percentages of people with no
+    population beside them, so a reader-built age group is an equal-weight mean of its
+    bands. Good enough to set against another group built the same way; not exact enough
+    to quote as the figure for everyone aged 16 to 34, which is what the card says.
   </p>
 </div>
 
@@ -125,8 +135,11 @@ docs/index.html + app.js + style.css             GitHub Pages</code></pre>
   <p>
     Enterprise counts exist only for 2021–2024. Deciding year by year would weight a
     trend's 2024 point and not its 2025 one, putting a step in the line that comes
-    from the method rather than the data. If any year a series needs lacks counts,
-    the whole series falls back to a plain average — and the page says which happened.
+    from the method rather than the data. A year the register does not reach borrows the
+    nearest year's counts — business populations drift by a few percent a year, while
+    the gap between a weighted and an unweighted average of countries is several times
+    that. Only where a cell has no count in any year does the whole series fall back to
+    a plain average, and the page says which happened.
   </p>
 </div>
 
@@ -136,7 +149,11 @@ docs/index.html + app.js + style.css             GitHub Pages</code></pre>
     Size classes are not a partition: <code>SME_10_249</code> contains
     <code>SMALL_10_49</code>, and <code>IND_TOTAL</code> contains every age band.
     Comparing a group against one that contains it is a part against its whole, so
-    the page warns on the chart itself.
+    the page warns on the chart itself. Selecting both into the <em>same</em> group is
+    the worse version of the same mistake — the double-counting disappears inside a
+    single number — so that is warned about too, and the absolute-count section, where
+    the double-counting would be a literal claim about how many firms exist, removes
+    itself instead.
   </p>
 </div>
 
