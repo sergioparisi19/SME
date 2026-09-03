@@ -138,7 +138,7 @@ docs/                      the published site (GitHub Pages root)
 
 <p>Three further behaviours that are easy to miss:</p>
 <ul>
-  <li><code>enterprise_count</code> is <strong>dropped</strong> wherever the unit is not a share of all enterprises, so the page cannot compute a weighted average on a base that would make it meaningless.</li>
+  <li><code>enterprise_count</code> is <strong>dropped</strong> wherever the unit is not a share of all enterprises, so no chart can mistake it for its own denominator. The page still weights those charts, but by looking the count up in its own index of the register and saying on the card that the weight is the size of the group rather than the exact base.</li>
   <li><code>_rows()</code> casts to <code>object</code> before nulling: on a float column pandas writes <code>NaN</code> back over <code>None</code>, and <code>json.dumps</code> would emit a bare <code>NaN</code>, which is not valid JSON. <code>allow_nan=False</code> makes that fail at build time rather than in someone's browser.</li>
   <li>Charts the page never trends are trimmed to their last three survey years — history the browser would download and never look at.</li>
 </ul>
@@ -160,22 +160,44 @@ meta.json     { generated_utc, tables, sources, caveats }</code></pre>
 
 <h3>The central abstraction</h3>
 <p>
-  Everything renders from a <strong>facet</strong>: a <code>{ geos, band }</code>
-  pair. <code>band</code> means a size class in the Companies view, a NACE section in
-  Industry, and an age band in Individuals — the only difference is which column
-  <code>DIMENSIONS[view].field</code> points at. That is why three views need one set
-  of renderers, and why adding the Industry view required almost no new rendering code.
+  Everything renders from a <strong>facet</strong>: a <code>{ geos, bands }</code>
+  pair of lists. <code>bands</code> means size classes in the Companies view, NACE
+  sections in Industry, and age bands in Individuals — the only difference is which
+  column <code>DIMENSIONS[view].field</code> points at. That is why three views need one
+  set of renderers, and why adding the Industry view required almost no new rendering
+  code.
+</p>
+<p>
+  Both halves are lists because either can be multi-selectable: a facet is the
+  <em>cross product</em> of its countries and its bands, and every figure drawn from it
+  is one average over those cells — weighted wherever a count for every cell exists. A
+  single selection is a list of one, which is why the same code path serves "Italy,
+  10–49" and "Italy and Spain, 25–34 plus 35–44".
+</p>
+<p>
+  <code>DIMENSIONS[view].multi</code> decides whether the control is a picker or a
+  native <code>&lt;select&gt;</code>. Only the age bands carry it. Size is deliberately
+  single-select: Eurostat already publishes the combinations anyone would build
+  (<code>SME_10_249</code>, <code>ALL_GE10</code>) as bands of their own, weighted by
+  Eurostat, so building them by hand would only reproduce a published figure less
+  accurately. Age bands have no published combination, and the reader's own grouping is
+  the only way to get one — at the cost that the household survey ships no population
+  counts, so those groups are an unweighted mean until a population table is added to
+  the pipeline. <code>BREAKDOWN_FIELDS</code> and <code>COUNT_COLUMNS</code> in
+  <code>buildWeights()</code> are where that would land.
 </p>
 
 <table>
   <thead><tr><th>Function</th><th>Responsibility</th></tr></thead>
   <tbody>
-    <tr><td><code>facets()</code></td><td>The one or two slices a chart draws. Comparing by band holds countries fixed; comparing by country holds the band fixed.</td></tr>
-    <tr><td><code>aggregateValues()</code></td><td>Combines countries — weighted by enterprise count where possible, plain mean otherwise, and reports which.</td></tr>
+    <tr><td><code>facets()</code></td><td>The one or two slices a chart draws. Comparing by band holds countries fixed; comparing by country holds the bands fixed.</td></tr>
+    <tr><td><code>buildWeights()</code> / <code>weightAt()</code></td><td>Index the register counts once by field, country, code and year, and answer "how many businesses are in this cell" — falling back to the nearest year the register covers.</td></tr>
+    <tr><td><code>aggregateValues()</code></td><td>Combines cells — countries, bands, or both — weighted by that count where every cell has one, plain mean otherwise, and reports which.</td></tr>
     <tr><td><code>weightingMode()</code></td><td>Decides weighting once for a whole series, so a trend line cannot mix methods across years.</td></tr>
-    <tr><td><code>absoluteCounts()</code></td><td>Percentages → number of businesses, strictly same-year.</td></tr>
+    <tr><td><code>weightingNote()</code></td><td>States on the card how the group was combined, so a weighted figure is never mistaken for a plain average or the reverse.</td></tr>
+    <tr><td><code>absoluteCounts()</code></td><td>Percentages → number of businesses, strictly same-year, and refused outright for an overlapping selection.</td></tr>
     <tr><td><code>niceScale()</code></td><td>Rounds the axis <em>step</em>, not the max — rounding the max alone still yields ticks at 18.75.</td></tr>
-    <tr><td><code>overlapWarning()</code></td><td>Detects a band pair where one contains the other.</td></tr>
+    <tr><td><code>overlapWarning()</code></td><td>Detects a band containing another, both between the two sides and inside one selection.</td></tr>
   </tbody>
 </table>
 
@@ -200,14 +222,17 @@ meta.json     { generated_utc, tables, sources, caveats }</code></pre>
 <h3>State and URL</h3>
 <pre><code>state = {
   view: "firm" | "sector" | "individual",
-  geos: ["IT", ...],                      // one country, or several averaged
+  geos: ["IT", ...],                      // one country, or several combined
   firm | sector | individual: {
-    band, compareMode: "band" | "geo", compareBand, compareGeos
+    bands: ["SMALL_10_49", ...],          // one band, or several combined
+    compareMode: "band" | "geo", compareBands: [...], compareGeos: [...]
   }
 }</code></pre>
 <p>
   Mirrored to the query string on every change, so any state is a shareable link:
-  <code>?view=sector&amp;geo=IT,ES&amp;band=C&amp;by=geo&amp;vs=DE,NL</code>.
+  <code>?view=firm&amp;geo=IT,ES&amp;band=SMALL_10_49,MEDIUM_50_249&amp;by=band&amp;vs=LARGE_GE250</code>.
+  A link naming several bands for a view whose control is single-select keeps the first
+  of them rather than a selection the control could not show.
 </p>
 
 <h2>Adding things</h2>

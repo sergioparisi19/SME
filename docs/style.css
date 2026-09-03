@@ -467,3 +467,91 @@ details.technical summary:hover { color: var(--ink); }
 details.technical[open] summary { border-bottom: 1px solid var(--grid); margin-bottom: 6px; }
 details.technical .caveats li { font-size: 13px; }
 details.technical .caveats li:last-child { border-bottom: 0; }
+
+/* --- Phones -------------------------------------------------------------
+   The 940px rule above already stacks the rail on top of the content, which is
+   enough for a tablet. A phone needs more than a stack: the rail's nine-item
+   nav, the four-control toolbar and the charts each assume a width that is not
+   there. Nothing here hides data - the nav scrolls sideways, the toolbar goes
+   two-up, the charts redraw at their real width (see geometry() in app.js), and
+   every figure stays reachable through the same table view.               */
+
+@media (max-width: 700px) {
+  main { padding: 0 16px 56px; }
+  .loading { padding: 40px 16px; }
+
+  .sidebar { padding: 16px 14px 14px; }
+  .brand { margin-bottom: 14px; }
+  .side-label { display: none; }
+
+  /* The nav becomes a sideways-scrolling strip of chips. Stacked, its nine
+     entries and four group headings push the first chart most of a screen
+     down; the narrative parts are the first thing to go, since the chips keep
+     their order and the reader can still see where they are. */
+  .nav-part { display: none; }
+  nav.analyses ol {
+    display: flex; gap: 6px; overflow-x: auto;
+    padding-bottom: 4px; margin: 0 -14px; padding-inline: 14px;
+    scrollbar-width: none;
+  }
+  nav.analyses ol::-webkit-scrollbar { display: none; }
+  nav.analyses li { flex: none; }
+  nav.analyses a {
+    white-space: nowrap; padding: 7px 12px;
+    background: rgba(255, 255, 255, 0.06);
+  }
+  nav.analyses a[aria-current="true"] { box-shadow: none; }
+
+  /* Not sticky: two rows of controls would hold a third of the screen for the
+     whole scroll. They sit at the top of the page and stay there. */
+  .toolbar {
+    position: static; display: grid; grid-template-columns: 1fr 1fr;
+    gap: 10px; padding: 12px 0 14px; backdrop-filter: none; background: none;
+  }
+  .field select, .dd-button { min-width: 0; width: 100%; padding: 9px 10px; }
+  .dd-panel { width: min(292px, calc(100vw - 32px)); max-height: 60vh; }
+  /* The right-hand column's panel would hang off the screen edge. */
+  .field:nth-child(even) .dd-panel { left: auto; right: 0; }
+
+  header.masthead { padding: 22px 0 4px; }
+  .standfirst { font-size: 15.5px; }
+  .unit-banner { display: flex; align-items: flex-start; border-radius: 12px; margin-top: 16px; }
+
+  section { margin: 36px 0 0; scroll-margin-top: 12px; }
+  section > h2 { font-size: 20px; }
+
+  .card { padding: 16px 14px 12px; border-radius: 13px; }
+  .card-head { flex-wrap: wrap; gap: 8px; }
+  .card-note, .card-warn { font-size: 11.5px; }
+
+  /* Four tiles two-up rather than one long column of hero numbers. */
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .tile { padding: 14px; border-radius: 13px; }
+  .tile .k { font-size: 10.5px; }
+  .tile .v { font-size: 29px; margin: 8px 0 4px; }
+  .tile .v.v-count { font-size: 21px; }
+  .tile .v.v-text { font-size: 15px; }
+  .tile .sub { font-size: 11.5px; }
+
+  .legend { gap: 10px 14px; margin-top: 12px; }
+  .tooltip { max-width: min(300px, calc(100vw - 24px)); }
+  .note { padding: 14px 16px; }
+  .note p { font-size: 13.5px; }
+}
+
+/* A wide table (the relief for every chart) scrolls inside its card rather
+   than stretching the page sideways. */
+.table-scroll { overflow-x: auto; margin-top: 16px; scrollbar-width: thin; }
+.table-scroll table.data { margin-top: 0; }
+
+/* --- Touch ---------------------------------------------------------------
+   Hover states on a touch screen either never fire or fire and stick. The
+   sibling-dimming rule is the one that actually breaks: a tap would leave every
+   other mark at half opacity until the next tap.                          */
+
+@media (hover: none) {
+  .chart svg:hover .mark { opacity: 1; }
+  .chart svg .mark:hover { opacity: 1; }
+  .tile:hover { transform: none; box-shadow: var(--shadow-1); }
+  .card:hover { box-shadow: var(--shadow-1); }
+}
