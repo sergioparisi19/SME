@@ -101,6 +101,11 @@ let LABELS = {};
 let META = {};
 const tooltip = document.createElement("div");
 let gradientSeq = 0;
+// Charts ask for the same slices many times while a page is rendered (tiles,
+// charts, tables and explanatory notes can all need one slice). Keep those
+// immutable result lists by chart and filter rather than scanning every row for
+// each consumer.
+const QUERY_CACHE = new Map();
 
 /* --- data access -------------------------------------------------------- */
 
@@ -117,10 +122,26 @@ function rows(chartId) {
   return chart._objects;
 }
 
+function filterKey(chartId, filter) {
+  return `${chartId}|${Object.entries(filter)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([field, value]) => `${field}=${Array.isArray(value)
+      ? [...value].sort().join(",") : String(value)}`)
+    .join("&")}`;
+}
+
+function matchesFilter(row, filter) {
+  return Object.entries(filter).every(([field, value]) =>
+    Array.isArray(value) ? value.includes(row[field])
+      : value === undefined || row[field] === value);
+}
+
 function where(chartId, filter) {
-  return rows(chartId).filter((r) =>
-    Object.entries(filter).every(([k, v]) =>
-      Array.isArray(v) ? v.includes(r[k]) : v === undefined || r[k] === v));
+  const key = filterKey(chartId, filter);
+  if (QUERY_CACHE.has(key)) return QUERY_CACHE.get(key);
+  const result = rows(chartId).filter((row) => matchesFilter(row, filter));
+  QUERY_CACHE.set(key, result);
+  return result;
 }
 
 function yearsOf(chartId, filter = {}) {
@@ -1396,7 +1417,7 @@ function ordinalCard(root, { chartId, indicator, options, title, note, kindLabel
  * words. Both ship: these up front, the exact wording behind the toggle. */
 const PLAIN_NOTES = [
   ["The smallest businesses are missing",
-   "The EU survey behind these numbers only reaches companies with 10 employees or more. Businesses smaller than that — which are the majority of firms in Europe — are never asked. So wherever this page says \"small firms\", it means 10 to 49 employees, not the corner shop."],
+   "The EU survey behind these numbers only reaches companies with 10 employees or more. Businesses smaller than that — which are the majority of firms in Europe — are never asked. So wherever this page says \"small firms\", it means 10 to 49 employees, not the smallest local businesses below that threshold."],
   ["Not every percentage is out of the same group",
    "Most figures here are a share of all companies. The \"why firms stay out\" figures are a share of only those companies that actually looked at AI and decided against it. Two numbers that both read 40% can therefore mean quite different things — each chart says underneath which group it is counting."],
   ["Groups overlap, so never add them together",
@@ -1451,8 +1472,8 @@ function renderMethodology(root) {
 /* --- view registry ------------------------------------------------------ */
 
 const HOW_TO_READ = {
-  id: "method", part: "Reading it", nav: "How to read this", h2: "How to read this",
-  deck: "Ten things that change what these numbers mean. They are worth two minutes before you quote any figure from this page.",
+  id: "method", part: "Reading it", nav: "Methodology", h2: "Methodology",
+  deck: "Ten factors that materially affect how these figures should be interpreted. Review this section before citing any figure from this analysis.",
   render: renderMethodology,
 };
 
@@ -1475,56 +1496,56 @@ const orderedSections = (sections) => [...sections]
 
 const VIEWS = {
   firm: {
-    headline: "Europe's small firms are falling behind on AI",
-    standfirst: "Eurostat's enterprise ICT surveys, read by firm size. Pick a size band and one or more countries — several countries combine into a single figure, weighted by how many businesses each has — then choose whether to compare it against another size band or against other countries.",
+    headline: "The AI adoption gap between small and large enterprises",
+    standfirst: "Eurostat's enterprise ICT surveys, read by firm size. Select a size band and one or more countries — several countries combine into a single figure, weighted by how many businesses each has — then choose whether to compare it against another size band or against other countries.",
     unitKey: "firm_level",
     sections: [
-      { id: "gap", part: "The scale", nav: "The gap", h2: "The gap, in one number",
-        deck: "The EU27 figure is Eurostat's own published aggregate, not an average of what you selected — the two are different numbers and the page never conflates them.",
+      { id: "gap", part: "The scale", nav: "The gap", h2: "The adoption gap, in one figure",
+        deck: "The EU27 figure is Eurostat's own published aggregate, not an average of what you selected — the two are different figures and this page never conflates them.",
         render: (r) => {
           headlineTiles(r, { chartId: "ai_adoption", indicator: "E_AI_TANY" });
           trendCard(r, { chartId: "ai_adoption", indicator: "E_AI_TANY",
             title: "AI adoption over time",
             note: "Every chart in this view uses the same comparison, so it stays consistent as you scroll." });
         } },
-      { id: "how-many", part: "The scale", nav: "How many firms", h2: "How many businesses is that?",
+      { id: "how-many", part: "The scale", nav: "Business counts", h2: "How many businesses does this represent?",
         available: () => absoluteCounts("ai_adoption", "E_AI_TANY", facets()[0]) !== null,
-        deck: "A percentage is arguable; a number of companies is harder to wave away. This is the same figure expressed as businesses.",
+        deck: "A percentage is arguable; a number of businesses is harder to dismiss. This section expresses the same figure as an estimated business count.",
         render: (r) => countsCard(r, { chartId: "ai_adoption", indicator: "E_AI_TANY",
           title: "Businesses of this size",
           note: "Applies the survey's percentage to the number of registered businesses in the selection." }) },
-      { id: "ranking", part: "Where it sits", nav: "By country", h2: "Where each country stands",
-        deck: "Ranked on the selected size band. Your selection stays emphasised as the ranking changes.",
+      { id: "ranking", part: "Where it sits", nav: "By country", h2: "AI adoption by country",
+        deck: "Countries are ranked by AI adoption for the selected size band. The current selection and the EU27 aggregate are highlighted.",
         render: (r) => rankingCard(r, { chartId: "ai_adoption", indicator: "E_AI_TANY",
           title: "AI adoption by country",
-          note: "Your selection and the EU27 aggregate are emphasised; the rest stay as context." }) },
-      { id: "purposes", part: "Where it sits", nav: "What AI is used for", h2: "What AI actually gets used for",
-        deck: "Adoption is not one thing. The purposes firms report differ sharply by size.",
+          note: "The current selection and the EU27 aggregate are highlighted; other countries are shown for context." }) },
+      { id: "purposes", part: "Where it sits", nav: "Uses of AI", h2: "What AI is used for",
+        deck: "Adoption is not one measure. The purposes firms report differ sharply by size.",
         render: (r) => comparisonCard(r, "ai_purposes", {
           title: "What AI gets used for",
           note: "All shares are of the same group — every company in the band — so the bars are directly comparable. A firm using AI for three purposes appears in three rows." }) },
-      { id: "barriers", part: "Why they don't", nav: "Why firms stay out", h2: "Why firms stay out",
-        deck: "Eurostat asks the firms that considered AI and did not adopt it. Cost and a lack of in-house expertise dominate — and unlike the technology itself, both are addressable.",
+      { id: "barriers", part: "Why they don't", nav: "Barriers", h2: "Barriers to AI adoption",
+        deck: "Eurostat surveys the enterprises that considered AI and chose not to adopt it. Cost and a lack of in-house expertise are the most frequently cited barriers.",
         render: (r) => comparisonCard(r, "ai_barriers", {
           title: "Why enterprises do not adopt AI",
           note: "Shares of the companies that considered AI — not of all companies, which is the group every other chart here counts. Reasons are not exclusive." }) },
-      { id: "foundations", part: "What is missing underneath", nav: "Digital foundations", h2: "The foundations underneath",
-        deck: "AI adoption rarely arrives on its own. Cloud services, data analytics practice and overall digital intensity are what it tends to sit on.",
+      { id: "foundations", part: "What is missing underneath", nav: "Digital foundations", h2: "Digital foundations underlying AI adoption",
+        deck: "AI adoption is associated with broader digital maturity. This section reports cloud computing use, data analytics practice and overall digital intensity.",
         render: (r) => comparisonCard(r, "foundations", {
           title: "The digital foundations underneath AI",
           note: "Shares of every company in the band." }) },
-      { id: "security", part: "What is missing underneath", nav: "ICT security", h2: "Security is the other unbuilt foundation",
-        deck: "The firms without AI expertise are largely the firms without security practice. It is the nearest neighbour to AI adoption — and the one an owner already believes matters.",
+      { id: "security", part: "What is missing underneath", nav: "ICT security", h2: "ICT security measures",
+        deck: "Enterprises without AI expertise are frequently the same enterprises without established ICT security practice, making this one of the more relevant capability gaps to track alongside AI adoption.",
         render: (r) => comparisonCard(r, "security", {
           title: "ICT security measures in place",
           note: "Shares of every company in the band." }) },
-      { id: "presence", part: "What is missing underneath", nav: "Digital presence", h2: "Before AI, a shop window",
-        deck: "Websites, social media and selling online — what a small firm recognises about itself long before it recognises an AI use case.",
+      { id: "presence", part: "What is missing underneath", nav: "Digital presence", h2: "Digital presence and online sales",
+        deck: "Websites, social media use and online sales — the digital capabilities enterprises typically establish before adopting AI.",
         render: (r) => comparisonCard(r, "presence", {
           title: "Digital presence and selling online",
           note: "Shares of every company in the band." }) },
-      { id: "skills", part: "What is missing underneath", nav: "ICT skills in the firm", h2: "The skills constraint",
-        deck: "What firms report about hiring. The workforce side of the same shortage sits in the Individuals view.",
+      { id: "skills", part: "What is missing underneath", nav: "ICT skills", h2: "ICT skills and recruitment",
+        deck: "What enterprises report about ICT recruitment. The workforce side of the same shortage is covered in the Individuals view.",
         render: (r) => comparisonCard(r, "skills", {
           title: "ICT skills inside the firm",
           note: "Recruitment difficulty is the constraint most often reported alongside a lack of AI expertise." }) },
@@ -1533,14 +1554,14 @@ const VIEWS = {
   },
 
   sector: {
-    headline: "AI adoption is six times higher in some industries than others",
-    standfirst: "The same Eurostat enterprise survey, read by industry instead of by size. Pick a sector, then compare it against another sector or against another country.",
+    headline: "AI adoption differs sharply between industry sectors",
+    standfirst: "The same Eurostat enterprise survey, read by industry sector rather than by size. Select a sector, then compare it against another sector or against other countries.",
     unitKey: "firm_level",
     // Sector and size are never crossed in the source, so this view cannot
     // carry an SME cut and must not imply one.
     unitNote: "Sector figures cover every enterprise with 10 or more employees. Eurostat does not break sector down by company size, so there is no small-firm cut here — that lives in the Companies view.",
     sections: [
-      { id: "gap", part: "The scale", nav: "The gap", h2: "The gap, in one number",
+      { id: "gap", part: "The scale", nav: "The gap", h2: "The adoption gap, in one figure",
         deck: "The EU27 figure is Eurostat's own published aggregate for this sector, not an average of what you selected.",
         render: (r) => {
           headlineTiles(r, { chartId: "sector_adoption", indicator: "E_AI_TANY" });
@@ -1548,33 +1569,33 @@ const VIEWS = {
             title: "AI adoption over time",
             note: "Every chart in this view uses the same comparison, so it stays consistent as you scroll." });
         } },
-      { id: "all-sectors", part: "Where it sits", nav: "Every sector ranked", h2: "Where the divide actually sits",
-        deck: "Every sector the survey reports for this selection, at once. Not all eleven are published for every country — Energy and Water are missing in many. Sectors have no natural order, so this is a single-colour ranking rather than the graded ramp the age bands get.",
+      { id: "all-sectors", part: "Where it sits", nav: "By sector", h2: "AI adoption by sector",
+        deck: "Every sector the survey reports for this selection, shown together. Not all eleven sectors are published for every country — energy and water are commonly missing. Sectors have no natural order, so this uses a single colour rather than the ordinal ramp applied to age bands.",
         render: (r) => breakdownRankCard(r, { chartId: "sector_adoption", indicator: "E_AI_TANY",
           title: "AI adoption by sector",
-          note: "The sectors you selected are emphasised; the rest stay as context." }) },
-      { id: "by-country", part: "Where it sits", nav: "By country", h2: "The same sector across Europe",
-        deck: "How far your selected sector varies between countries.",
+          note: "The selected sectors are highlighted; the rest are shown for context." }) },
+      { id: "by-country", part: "Where it sits", nav: "By country", h2: "This sector across Europe",
+        deck: "How the selected sector's AI adoption rate varies between countries.",
         render: (r) => rankingCard(r, { chartId: "sector_adoption", indicator: "E_AI_TANY",
           title: "AI adoption by country",
-          note: "Your selection and the EU27 aggregate are emphasised; the rest stay as context." }) },
-      { id: "purposes", part: "Where it sits", nav: "What AI is used for", h2: "What AI actually gets used for",
-        deck: "The purposes firms report differ as sharply by industry as they do by size.",
+          note: "The current selection and the EU27 aggregate are highlighted; other countries are shown for context." }) },
+      { id: "purposes", part: "Where it sits", nav: "Uses of AI", h2: "What AI is used for",
+        deck: "The purposes enterprises report differ as sharply by industry as they do by size.",
         render: (r) => comparisonCard(r, "sector_purposes", {
           title: "What AI gets used for",
           note: "All shares are of the same group — every company in the sector — so the bars are directly comparable. A firm using AI for three purposes appears in three rows." }) },
-      { id: "technologies", part: "Where it sits", nav: "Which technologies", h2: "Which technologies they actually run",
-        deck: "Adoption headlines hide what is underneath: text mining and machine learning behave nothing like autonomous robots.",
+      { id: "technologies", part: "Where it sits", nav: "Technologies", h2: "AI technologies in use",
+        deck: "Adoption figures alone obscure real differences underneath: text mining and machine learning are measured separately from technologies enabling autonomous physical action, such as robotics.",
         render: (r) => comparisonCard(r, "sector_tech", {
           title: "AI technologies in use",
           note: "Shares of every company in the sector. A firm running three technologies appears in three rows." }) },
-      { id: "barriers", part: "Why they don't", nav: "Why firms stay out", h2: "Why firms stay out",
-        deck: "Asked of the firms that considered AI and decided against it.",
+      { id: "barriers", part: "Why they don't", nav: "Barriers", h2: "Barriers to AI adoption",
+        deck: "Eurostat surveys the enterprises that considered AI and chose not to adopt it, by sector.",
         render: (r) => comparisonCard(r, "sector_barriers", {
           title: "Why enterprises do not adopt AI",
           note: "Shares of the companies that considered AI — not of all companies, which is the group every other chart here counts. Reasons are not exclusive." }) },
-      { id: "skills", part: "What is missing underneath", nav: "ICT skills", h2: "The skills constraint",
-        deck: "Whether the sector employs ICT specialists at all, and whether it trains its own people.",
+      { id: "skills", part: "What is missing underneath", nav: "ICT skills", h2: "ICT skills and recruitment",
+        deck: "Whether the sector employs ICT specialists at all, and whether it provides ICT skills training.",
         render: (r) => comparisonCard(r, "sector_skills", {
           title: "ICT skills inside the firm",
           note: "Shares of every company in the sector." }) },
@@ -1583,25 +1604,25 @@ const VIEWS = {
   },
 
   individual: {
-    headline: "The workforce Europe's SMEs hire from",
-    standfirst: "Eurostat's household ICT survey — people, not companies. Pick as many age bands as you like and they combine into one group, so you can read \"everyone under 45\" or \"the cohort about to retire\" rather than one band at a time, then compare that group against other bands or against other countries.",
+    headline: "The digital skills of the workforce SMEs hire from",
+    standfirst: "Eurostat's household ICT survey, covering individuals rather than enterprises. Select one or more age bands — they combine into a single group, for example everyone under 45 — then compare against other age bands or against other countries.",
     unitKey: "individual_level",
     sections: [
-      { id: "age-gap", part: "The scale", nav: "The age gap", h2: "The gap, in one number",
-        deck: "Generative AI use in the last three months, for the age band you selected against whatever you are comparing it with.",
+      { id: "age-gap", part: "The scale", nav: "The gap", h2: "Generative AI use, by age",
+        deck: "Generative AI use in the last three months, for the age band selected against the chosen comparison.",
         render: (r) => {
           headlineTiles(r, { chartId: "workforce", indicator: "I_IUAI" });
           comparisonCard(r, "workforce", {
             title: "Generative AI and digital skills",
-            note: "The same four measures, read for both sides of your comparison." });
+            note: "The same four measures, read for both sides of the comparison." });
         } },
       { id: "genai-country", part: "Where it sits", nav: "By country", h2: "Generative AI use across Europe",
-        deck: "The first year Eurostat surveyed generative AI use among the general population, ranked for your selected age band.",
+        deck: "The first year Eurostat surveyed generative AI use among the general population, ranked for the selected age band.",
         render: (r) => rankingCard(r, { chartId: "workforce", indicator: "I_IUAI",
           title: "Generative AI use by country",
           note: "Share of people in the selected age band who used a generative AI tool in the last three months." }) },
-      { id: "genai-age", part: "Where it sits", nav: "Across every age", h2: "Where the drop-off happens",
-        deck: "Age bands are ordered, so they take the ordinal ramp rather than categorical hues. The bands you selected are emphasised.",
+      { id: "genai-age", part: "Where it sits", nav: "By age", h2: "Generative AI use across age bands",
+        deck: "Age bands are ordered, so they take the ordinal ramp rather than categorical hues. The selected bands are highlighted.",
         render: (r) => {
           ordinalCard(r, { chartId: "workforce", indicator: "I_IUAI",
             options: AGE_ORDER.filter((c) => c !== "IND_TOTAL"),
@@ -1612,32 +1633,32 @@ const VIEWS = {
             title: "Generative AI use for work purposes", kindLabel: "Age band",
             note: "Share of all people in the age band, not of AI users — the closest proxy for what walks into an SME on Monday morning." });
         } },
-      { id: "occupation", part: "Who can do it", nav: "By occupation", h2: "It tracks the job, not the person",
-        deck: "The single widest divide in this data. Whether someone uses AI depends less on their age than on what they do all day.",
+      { id: "occupation", part: "Who can do it", nav: "By occupation", h2: "Generative AI use by occupation",
+        deck: "The single widest divide in this data. Generative AI use depends less on age than on occupation.",
         render: (r) => ordinalCard(r, { chartId: "workforce", indicator: "I_IUAI",
           options: ["ISCO_ICT", "ISCO0_5", "ISCO_ICTX", "ISCO6_9"],
           title: "Generative AI use by occupation", kindLabel: "Occupation",
           note: "Ordered from most to least digital work, so the ramp follows the ordering." }) },
-      { id: "place", part: "Where it sits", nav: "City vs countryside", h2: "The divide is geographic too",
-        deck: "Where someone lives shifts their likelihood of using AI almost as much as their education does.",
+      { id: "place", part: "Where it sits", nav: "By location", h2: "Generative AI use by degree of urbanisation",
+        deck: "Where someone lives shifts the likelihood of using AI almost as much as their education does.",
         render: (r) => ordinalCard(r, { chartId: "workforce", indicator: "I_IUAI",
           options: ["IND_DEG1", "IND_DEG2", "IND_DEG3"],
           title: "Generative AI use by where people live", kindLabel: "Area",
           note: "Cities, towns and suburbs, and rural areas — Eurostat's three degrees of urbanisation." }) },
-      { id: "status", part: "Who can do it", nav: "By work status", h2: "Students are already there",
+      { id: "status", part: "Who can do it", nav: "Work status", h2: "Generative AI use by labour-force status",
         deck: "The cohort entering the labour market has adopted these tools at rates the working population has not.",
         render: (r) => ordinalCard(r, { chartId: "workforce", indicator: "I_IUAI",
           options: ["STUD", "SAL_SELF_FAM", "UNE", "RETIR_OTHER"],
           title: "Generative AI use by labour-force status", kindLabel: "Status",
           note: "These groups do not overlap, but they are not a partition of the population either." }) },
-      { id: "gender", part: "Who can do it", nav: "The gender gap", h2: "A gap that survives education",
+      { id: "gender", part: "Who can do it", nav: "Gender gap", h2: "Gender gap within education level",
         deck: "Eurostat publishes no plain male/female total — sex is only crossed with education. That turns out to be the more useful cut anyway: the gap persists at every level.",
         render: (r) => ordinalCard(r, { chartId: "workforce", indicator: "I_IUAI",
           options: ["M_I5_8", "F_I5_8", "M_I3_4", "F_I3_4", "M_I0_2", "F_I0_2"],
           title: "Generative AI use by sex within education level", kindLabel: "Group",
           note: "Read them in pairs: men and women at the same level of education." }) },
-      { id: "skills-edu", part: "Who can do it", nav: "The talent pool", h2: "The talent pool",
-        deck: "Basic-or-above overall digital skills by education level. This is the pool an SME hires from, and the one measure here with a history to trend.",
+      { id: "skills-edu", part: "Who can do it", nav: "Digital skills", h2: "Digital skills by education level",
+        deck: "Basic or above-basic digital skills, by education level. This is the pool SMEs hire from, and the only measure here with a multi-year trend.",
         render: (r) => {
           ordinalCard(r, { chartId: "workforce", indicator: "I_DSK2_BAB",
             options: EDU_ORDER, title: "Digital skills by education", kindLabel: "Education",
@@ -1786,78 +1807,83 @@ function optionPicker(host, {
 
 /* --- rendering ---------------------------------------------------------- */
 
-function renderAll() {
-  const view = VIEWS[state.view];
-  const d = dim();
-  const s = sel();
+const byId = (id) => document.getElementById(id);
 
-  document.getElementById("headline").textContent = view.headline;
-  document.getElementById("standfirst").textContent = view.standfirst;
+function renderPageHeader(view) {
+  byId("headline").textContent = view.headline;
+  byId("standfirst").textContent = view.standfirst;
 
-  const banner = document.getElementById("unit-banner");
-  banner.innerHTML = "";
-  banner.appendChild(el("strong", { text: "Unit of observation:" }));
-  banner.appendChild(document.createTextNode(
-    ` ${view.unitNote ?? META.tables[view.unitKey].unit_of_observation}`));
+  const banner = byId("unit-banner");
+  banner.replaceChildren(
+    el("strong", { text: "Unit of observation:" }),
+    document.createTextNode(` ${view.unitNote ?? META.tables[view.unitKey].unit_of_observation}`),
+  );
+}
 
+function setSelectOptions(select, options, labelOf, selected) {
+  select.replaceChildren(...options.map((code) =>
+    el("option", { value: code, text: labelOf(code) })));
+  select.value = selected;
+}
+
+function renderDimensionControls(d, s) {
   // A dimension that can hold several values at once gets the picker; one that
   // cannot keeps the native select, which is lighter and needs no explaining.
   // Both controls exist in the markup and take turns, so the label's `for`
   // has to follow whichever is showing.
-  const primaryLabel = document.getElementById("lbl-primary");
+  const primaryLabel = byId("lbl-primary");
   primaryLabel.textContent = d.multi ? `${d.control}s` : d.control;
-  primaryLabel.setAttribute("for", d.multi ? "dd-primary-button" : "primary-select");
-  document.getElementById("opt-mode-band").textContent = d.control;
+  primaryLabel.htmlFor = d.multi ? "dd-primary-button" : "primary-select";
+  byId("opt-mode-band").textContent = d.control;
 
-  const primarySel = document.getElementById("primary-select");
-  const primaryPick = document.getElementById("dd-primary");
-  primarySel.hidden = d.multi;
-  primaryPick.hidden = !d.multi;
-  if (!d.multi) {
-    primarySel.innerHTML = "";
-    d.options.forEach((code) => primarySel.appendChild(
-      el("option", { value: code, text: d.labelOf(code) })));
-    primarySel.value = s.bands[0];
-  }
+  const primarySelect = byId("primary-select");
+  byId("dd-primary").hidden = !d.multi;
+  primarySelect.hidden = d.multi;
+  if (!d.multi) setSelectOptions(primarySelect, d.options, d.labelOf, s.bands[0]);
 
-  document.getElementById("compare-mode").value = s.compareMode;
-
-  // The comparison is either the other bands or the other countries - whichever
-  // dimension the reader chose to vary - and the band side takes the same
-  // picker-or-select turn the primary control does.
-  const cmpSel = document.getElementById("compare-select");
-  const cmpBandPick = document.getElementById("dd-compare-band");
-  const cmpGeoPick = document.getElementById("dd-compare");
   const byBand = s.compareMode === "band";
-  cmpSel.hidden = !byBand || d.multi;
-  cmpBandPick.hidden = !byBand || !d.multi;
-  cmpGeoPick.hidden = byBand;
-  document.getElementById("lbl-compare").setAttribute("for",
-    byBand ? (d.multi ? "dd-compare-band-button" : "compare-select") : "dd-compare-button");
+  const compareSelect = byId("compare-select");
+  byId("dd-compare-band").hidden = !byBand || !d.multi;
+  byId("dd-compare").hidden = byBand;
+  compareSelect.hidden = !byBand || d.multi;
+  byId("lbl-compare").htmlFor = byBand
+    ? (d.multi ? "dd-compare-band-button" : "compare-select")
+    : "dd-compare-button";
   if (byBand && !d.multi) {
-    cmpSel.innerHTML = "";
-    d.options.forEach((code) => cmpSel.appendChild(
-      el("option", { value: code, text: d.labelOf(code) })));
-    cmpSel.value = s.compareBands[0];
+    setSelectOptions(compareSelect, d.options, d.labelOf, s.compareBands[0]);
   }
 
   geoPicker?.paint();
   comparePicker?.paint();
   primaryPicker?.paint();
   compareBandPicker?.paint();
+}
 
-  const host = document.getElementById("sections");
-  host.innerHTML = "";
+function renderSections(view) {
+  const host = byId("sections");
+  host.replaceChildren();
   orderedSections(view.sections).forEach((spec) => {
     const section = el("section", { id: `sec-${spec.id}` });
-    section.appendChild(el("h2", { text: spec.h2 }));
-    section.appendChild(el("p", { class: "deck", text: spec.deck }));
     const body = el("div");
-    section.appendChild(body);
+    section.append(
+      el("h2", { text: spec.h2 }),
+      el("p", { class: "deck", text: spec.deck }),
+      body,
+    );
     host.appendChild(section);
     spec.render(body);
   });
+}
 
+function renderAll() {
+  const view = VIEWS[state.view];
+  const d = dim();
+  const s = sel();
+
+  renderPageHeader(view);
+  byId("compare-mode").value = s.compareMode;
+  renderDimensionControls(d, s);
+  renderSections(view);
   buildNav();
 }
 
@@ -2101,30 +2127,44 @@ function readUrl() {
 
 /* --- boot --------------------------------------------------------------- */
 
-async function boot() {
-  const [series, labels, meta] = await Promise.all(
-    ["series", "labels", "meta"].map((f) => fetch(`data/${f}.json`).then((r) => {
-      if (!r.ok) throw new Error(`${f}.json: ${r.status}`);
-      return r.json();
-    })));
-  SERIES = series; LABELS = labels; META = meta;
-  buildWeights();
+async function fetchBundle(name) {
+  const response = await fetch(`data/${name}.json`);
+  if (!response.ok) throw new Error(`${name}.json: ${response.status}`);
+  return response.json();
+}
 
+async function loadData() {
+  const [series, labels, meta] = await Promise.all(
+    ["series", "labels", "meta"].map(fetchBundle));
+  SERIES = series;
+  LABELS = labels;
+  META = meta;
+  QUERY_CACHE.clear();
+  buildWeights();
+}
+
+function revealApplication() {
   tooltip.className = "tooltip";
   document.body.appendChild(tooltip);
+  byId("app").hidden = false;
+  byId("boot").remove();
+}
 
-  readUrl();
-  document.getElementById("app").hidden = false;
-  document.getElementById("boot").remove();
-
-  buildControls();
-  renderAll();
-  watchWidth();
-
-  document.getElementById("generated").textContent =
+function renderGeneratedAt() {
+  byId("generated").textContent =
     `Data generated ${META.generated_utc.slice(0, 10)} from Eurostat.`;
 }
 
+async function boot() {
+  await loadData();
+  readUrl();
+  revealApplication();
+  buildControls();
+  renderAll();
+  watchWidth();
+  renderGeneratedAt();
+}
+
 boot().catch((err) => {
-  document.getElementById("boot").textContent = `Could not load the data bundle: ${err.message}`;
+  byId("boot").textContent = `Could not load the data bundle: ${err.message}`;
 });
