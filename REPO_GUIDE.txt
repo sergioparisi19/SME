@@ -1,0 +1,450 @@
+================================================================================
+ REPO GUIDE — SME Digital & AI Readiness Index
+================================================================================
+
+This file is a single-place orientation to the repository: what it is for,
+what every file does, and how to run each part of it. It summarizes and
+cross-references the more detailed documents that already live in the repo
+(README.md, CODE_ARCHITECTURE.md, DATA_PIPELINE_SPEC.md, and the in-site docs
+under docs/documentation/) rather than replacing them — read those for the
+full depth on any topic flagged below.
+
+--------------------------------------------------------------------------------
+ 1. WHAT THIS REPO IS
+--------------------------------------------------------------------------------
+
+Status: Draft v0.1. Scope: EU-27 (+ a handful of non-EU comparator countries).
+
+This is a small, static, no-backend web portal — "The SME AI Gap" — that turns
+official EU statistics (Eurostat) into a clear, visual, shareable picture of
+how far small and medium enterprises (SMEs) lag large enterprises in digital
+and AI adoption. It is content/thought-leadership, not a product: a single
+HTML page with embedded interactive charts, meant to be linked and posted
+(e.g. on LinkedIn), refreshed on a recurring cadence as new survey data
+arrives.
+
+The headline argument the data supports (see docs/documentation/index.html):
+the AI adoption gap between small and large firms is not primarily a
+technology gap — it is a capability gap (expertise, cost, data readiness),
+it is unevenly spread across sectors and countries, and non-adopters
+themselves say the barrier is capability rather than usefulness.
+
+Why it exists / business framing: see README.md ("Why" / "Business Value" /
+"Roadmap" sections) — positioning as thought leadership + lead generation for
+work in SME digitalization and AI adoption advisory.
+
+--------------------------------------------------------------------------------
+ 2. HIGH-LEVEL ARCHITECTURE — TWO INDEPENDENT FLOWS
+--------------------------------------------------------------------------------
+
+The project is deliberately split into two flows that should be kept separate
+when making changes (see CODE_ARCHITECTURE.md):
+
+  (A) DATA PIPELINE  — sme_pipeline/ package
+      Pulls raw statistics from Eurostat's API, cleans and joins them into two
+      canonical tables (Parquet + a JSON "datamap" data dictionary).
+
+  (B) SITE EXPORT + FRONTEND — export.py + docs/
+      Reads the canonical Parquet tables, curates a small per-chart JSON
+      bundle, and ships it to a static HTML/CSS/vanilla-JS page that renders
+      the interactive dashboard. Nothing in the frontend touches Eurostat or
+      Parquet directly — it only ever reads docs/data/*.json.
+
+There is also a third, standalone piece:
+
+  (C) BARRIER ANALYSIS — analyse_barriers.py + sme_pipeline/barrier_analysis.py
+      An offline statistical analysis (not part of the site build) asking
+      which non-adoption "barriers" firms cite actually track the adoption
+      gap between countries, once survey year is controlled for. Output is
+      CSVs meant to be read and reasoned about, not charted automatically —
+      the finding that the most-cited barrier is not necessarily the one
+      that explains cross-country differences is easy to overstate visually.
+
+Full data flow (see CODE_ARCHITECTURE.md for the "start here" table by task):
+
+    Eurostat API
+      -> extract.py     (cached JSON-stat, data/raw/)
+      -> parse.py        (tidy DataFrame via pyjstat, naming="id")
+      -> normalize.py     (raw codes -> canonical codes; fails loudly on unknowns)
+      -> transform.py      (join firm/individual indicators to the enterprise universe)
+      -> datamap.py + load.py (Parquet + datamap.json, data/processed/)
+      -> export.py            (curated per-chart JSON, docs/data/*.json)
+      -> docs/app.js               (renders the interactive dashboard in the browser)
+
+--------------------------------------------------------------------------------
+ 3. FILE-BY-FILE REFERENCE
+--------------------------------------------------------------------------------
+
+--- Top-level docs (read these for depth) ---
+
+README.md
+    Project pitch: why it exists, what it is, business value, roadmap.
+    Start here for the "why".
+
+CODE_ARCHITECTURE.md
+    One page pointing at which file to read first for a given kind of change
+    (sources, pipeline order, schema, charts, barrier methodology), plus the
+    file-size/responsibility rule: keep executable logic out of the large,
+    declarative modules (export.py, barrier_analysis.py, datamap.py).
+
+DATA_PIPELINE_SPEC.md
+    THE authoritative spec for the data layer: every Eurostat dataset used,
+    join keys, the size-class/NACE-sector caveats, the primary keys, the two
+    output table schemas (firm_level, individual_level), and every caveat
+    that matters when interpreting a number (micro-enterprises excluded,
+    mismatched "all sectors" totals, time-coverage gaps, etc). Read this
+    before touching anything in sme_pipeline/.
+
+--- Top-level scripts ---
+
+fetch_data.py
+    CLI entry point for the data pipeline. Thin wrapper over
+    sme_pipeline.pipeline.run().
+        python fetch_data.py                          run at the default geo
+                                                        scope (config.DEFAULT_GEO:
+                                                        EU27_2020 + all 27 member
+                                                        states + 6 non-EU
+                                                        comparators)
+        python fetch_data.py --geo IT DE EU27_2020     narrower/dev scope
+                                                        (matches config.DEV_GEO)
+        python fetch_data.py --geo IT DE FR --refresh  wider scope, bypass cache
+        python fetch_data.py --time 2024 2025          restrict years fetched
+        python fetch_data.py --no-write                dry run, writes nothing
+    Writes data/processed/{firm_level,individual_level}.parquet and their
+    .datamap.json companions.
+
+build_site.py
+    Builds the page-ready JSON export and serves docs/ locally for iteration.
+    Kept out of sme_pipeline/ on purpose — it is presentation, not data.
+        python build_site.py              rebuild docs/data/*.json, then serve
+                                           on http://127.0.0.1:8731 and open
+                                           a browser
+        python build_site.py --no-serve   build only (what CI would run)
+        python build_site.py --no-build   serve only, using what's already
+                                           in docs/data/ (fast iteration on
+                                           HTML/CSS/JS)
+        python build_site.py --port 8000  choose a port (falls back to a free
+                                           one automatically if taken)
+    You must serve over HTTP, not open index.html from disk — fetch() is
+    blocked on a file:// origin and the page will hang on "Loading data...".
+    The dev server also disables caching so a stale bundle is never the
+    reason something looks wrong.
+
+analyse_barriers.py
+    Standalone offline analysis (not run by build_site.py or the pipeline).
+    Fits a per-size-tier regression + Shapley decomposition to work out which
+    AI non-adoption barriers actually move the cross-country adoption gap,
+    with bootstrap stability checks. See the module's own extensive docstring
+    for the full methodology and column definitions.
+        python analyse_barriers.py                writes both output CSVs
+        python analyse_barriers.py --years 2025    fit on one survey year only
+        python analyse_barriers.py --every-year    keep all years in the
+                                                    by-country output (default:
+                                                    latest year only)
+        python analyse_barriers.py --draws 1000    tighter bootstrap confidence
+                                                    intervals (slower)
+        python analyse_barriers.py --out-dir DIR   change output location
+    Requires data/processed/firm_level.parquet to already exist (run
+    fetch_data.py first). Writes:
+      data/analysis/barrier_importance.csv               one row per size
+                                                           tier x barrier
+      data/analysis/barrier_contributions_by_country.csv  per-country gap
+                                                           decomposition
+
+requirements.txt
+    requests, pandas, pyjstat, pyarrow. Install with:
+        pip install -r requirements.txt
+
+--- sme_pipeline/ (the data pipeline package) ---
+
+__init__.py
+    Package docstring summarizing the stage order — a quick map, not logic.
+
+config.py
+    Declarative only (no I/O, no transforms). The single source of truth for:
+    the Eurostat dataset registry (DatasetSpec list — 17 tables), geography
+    scopes (DEFAULT_GEO, DEV_GEO, EU27, NON_EU_REPORTERS), canonical size-class
+    code mapping (SIZE_EMP_CANONICAL) and which bands are derived by summing
+    others (SIZE_EMP_DERIVED), the two distinct "all sectors" NACE totals
+    (SBS vs ICT-survey population), and the verified join/primary keys for
+    each table. Adding a new Eurostat dataset is a one-line DatasetSpec here.
+
+extract.py — Stage 1: fetch + cache
+    Calls the Eurostat API and caches raw JSON-stat responses to data/raw/.
+    Two notable behaviours: (1) the cache is keyed by the exact request
+    params, so changing --geo/--time re-fetches instead of silently reusing
+    stale scope; (2) Eurostat responds HTTP 413 when a query is too broad —
+    the fetch recursively halves the geo list and retries rather than using a
+    hard-coded batch size. A failure fetching the universe table (sbs_sc_ovw)
+    is fatal; a failure on any other dataset is logged and skipped.
+
+parse.py — Stage 2: JSON-stat -> tidy DataFrame
+    Uses pyjstat (naming="id", not the default "label" — otherwise codes come
+    back as unusable human sentences) to flatten each response into one row
+    per observation, drops the constant `freq` dimension, and drops rows with
+    no value (JSON-stat materializes the full dimension cross-product, most
+    of which is empty). Also extracts the Eurostat code->label vocabulary
+    used later to build the datamap, and asserts declared keys are unique.
+
+normalize.py — Stage 3: raw codes -> canonical vocabulary
+    Every function here fails loudly (raises) on a code it doesn't recognise,
+    by design — Eurostat adds/renames categories between survey waves, and a
+    silent drop would corrupt headline numbers invisibly. Key pieces:
+    normalize_size_emp() (maps raw size bands to canonical names),
+    decode_ind_type() / expand_ind_type() (Eurostat packs sex, age, education,
+    labour status and citizenship into one ~105-value dimension on the
+    individual-level survey; this decodes the demographic subset the portal
+    uses), and normalize_indicator() (renames indic_is/indic_sbs -> indicator,
+    keeping `unit` as a separate column since several metrics share one
+    indicator code and differ only by unit).
+
+transform.py — Stage 4: assemble + join
+    Builds the enterprise-count "universe" (denominator) table from
+    sbs_sc_ovw, deriving size bands Eurostat doesn't publish directly (e.g.
+    SMALL_10_49 = 10-19 + 20-49 — valid because counts, unlike percentages,
+    are additive) — only when every component band is present. Then builds
+    the firm-level table (joining each firm indicator dataset onto the
+    universe) and the individual-level table (built separately, never merged
+    with firm-level — they describe different units of observation).
+    join_report() gives the per-source-dataset denominator match rate, the
+    key regression signal for the join.
+
+datamap.py — build the data dictionary
+    Produces the {table}.datamap.json data dictionary that makes the short
+    Parquet codes ("IT", "SMALL_10_49", "PC_ENT") legible again: per-column
+    label/role/dtype/nullability/distinct-count, per-value code->label
+    vocabulary (with `base` and `weightable` flags for every `unit` code —
+    which population a percentage is a share of, and whether enterprise_count
+    is its valid denominator), plus the table's caveats carried inside the
+    data product itself. Build-only; load.py does the writing.
+
+load.py — Stage 5: write outputs
+    Writes each table to Parquet (the canonical artifact — already
+    dictionary-encodes strings internally, so codes stay human-readable at no
+    storage cost) and its datamap to indented JSON, both into
+    data/processed/. Replaces an earlier row-level JSON dump design that hit
+    9.8 MB at dev scope for no benefit over the Parquet.
+
+pipeline.py — orchestration
+    Chains extract -> parse -> normalize/transform -> datamap -> load into
+    one run() call, logging progress (dataset row counts, join match rates,
+    datamap coverage) along the way. Returns every intermediate result
+    (PipelineResult dataclass) so a notebook can inspect any stage without
+    reimplementing it.
+
+barrier_analysis.py — barrier-vs-adoption methodology
+    The statistical engine behind analyse_barriers.py. Fits one model per
+    disjoint size tier (small/medium/large — not the overlapping composite
+    bands) relating the seven AI non-adoption barrier percentages to the AI
+    adoption rate, controlling for survey year, then uses a Shapley
+    decomposition (not raw coefficients, since barriers are correlated) to
+    split "how much of the explained gap" each barrier accounts for, with
+    country-level bootstrap resampling to flag whether a tier's leading
+    barrier is stable enough to publish. Also produces by_country(), a
+    per-country decomposition of the gap between actual and model-expected
+    adoption. Extensive module docstring explains every design decision and
+    why nothing here should be read as causal — read it before changing the
+    methodology.
+
+--- data/ (inputs and outputs) ---
+
+data/raw/*.json
+    Cached raw Eurostat JSON-stat API responses, one file per dataset code,
+    keyed by request params. Git-ignored (see .gitignore) — regenerated by
+    fetch_data.py, not meant to be committed.
+
+data/processed/
+    firm_level.parquet / firm_level.datamap.json
+    individual_level.parquet / individual_level.datamap.json
+    The canonical, typed output tables and their data dictionaries. Committed
+    to the repo (not git-ignored) since they are the pipeline's product.
+    Full schema, grain, and caveats: DATA_PIPELINE_SPEC.md.
+
+data/analysis/
+    barrier_importance.csv
+    barrier_contributions_by_country.csv
+    Output of analyse_barriers.py. Column definitions are documented in that
+    script's module docstring.
+
+--- notebooks (exploration / QA — no pipeline logic of their own) ---
+
+explore_data.ipynb
+    QA surface for the pipeline: imports sme_pipeline and inspects its
+    output (join health, coverage by year, the headline SME-vs-large gap,
+    individual-level decode coverage, the individual-vs-enterprise contrast).
+    Deliberately holds no parsing/joining logic of its own — everything it
+    checks runs through the same package code that produces data/processed/.
+    Findings that came out of using this notebook were promoted into
+    DATA_PIPELINE_SPEC.md as permanent documentation.
+
+analysis.ipynb
+    Ad hoc/exploratory analysis notebook.
+
+notebooks/barrier_importance.ipynb
+    Runnable notebook version of the barrier-analysis methodology in
+    sme_pipeline/barrier_analysis.py.
+
+--- docs/ (the published static site — GitHub Pages root) ---
+
+Note: the folder is named "docs" (not "site") because GitHub Pages' branch
+deployment only allows serving from the repository root or /docs.
+
+index.html
+    The single page shell: sidebar (brand, a "Companies / Industry /
+    Individuals" view switch, an analyses nav), a header, a filter toolbar
+    (countries, size band / compare-by / compare-with), and a #sections
+    container that app.js populates. Loads app.js as the only script.
+
+style.css
+    All page styling (557 lines) — no CSS framework.
+
+app.js (~2170 lines — the entire frontend logic, no build step, no framework)
+    Fetches docs/data/{series,labels,meta}.json and renders everything
+    client-side. Key ideas (fully documented in docs/documentation/code.html):
+      - Central abstraction: a "facet" = {geos, bands} — a cross product of
+        selected countries and selected bands (size classes in Companies
+        view, NACE sections in Industry view, age bands in Individuals view).
+        One set of renderers serves all three views because they only differ
+        in which data column a facet's "band" points at.
+      - facets() / buildWeights() / weightAt() / aggregateValues():
+        combine cells into one figure, weighted by enterprise/person count
+        wherever available, plain mean otherwise — and always say which.
+      - Chart primitives (rankedBars, groupedBars, lineChart, ordinalBars):
+        plain inline SVG, no charting library; nulls render as "Not
+        published" rather than being silently omitted.
+      - VIEWS: a declarative registry of sections (headline tiles, trend,
+        ranking, comparison, breakdown, counts cards) per view.
+      - State is mirrored to the URL query string on every change, so every
+        selection is a shareable link.
+
+data/series.json, data/labels.json, data/meta.json
+    The curated, page-ready bundle built by sme_pipeline/export.py. This is
+    committed to the repo (there's no server-side build step on GitHub
+    Pages) — see the "Deployment" section below for the consequence of
+    forgetting to rebuild/commit it after a pipeline or export change.
+
+documentation/index.html, design.html, code.html (+ doc.css)
+    A three-level in-site documentation trail, linked from within itself:
+      1. index.html  — "What this is for": the problem, the argument the
+                        data makes, what you can do with the portal, why the
+                        numbers can be trusted, what the data cannot tell you.
+      2. design.html — architecture rationale (why static HTML and not a
+                        database or Streamlit; why the export layer exists),
+                        the rules the page enforces, the visual system
+                        (palette, encoding rules, motion), the narrative arc.
+      3. code.html   — a module-by-module code reference (repository layout,
+                        running instructions, pipeline stage-by-stage,
+                        export.py's data contract and bundle shape, app.js's
+                        internals, a table of "how to add X", and deployment
+                        notes). This file and docs/documentation/code.html
+                        overlap heavily by design — code.html is the
+                        user-facing/portal version, this REPO_GUIDE.txt is
+                        the repo-root/contributor version.
+
+.nojekyll
+    Tells GitHub Pages not to run its Jekyll build step on docs/ (needed
+    because file/folder names here would otherwise be mishandled by Jekyll).
+
+--- Misc ---
+
+.gitignore
+    Ignores __pycache__/, *.pyc, .venv/, and data/raw/ (the API cache).
+
+__pycache__/, sme_pipeline/__pycache__/
+    Compiled bytecode caches; not meaningful, git-ignored.
+
+--------------------------------------------------------------------------------
+ 4. HOW TO RUN THE WHOLE THING, END TO END
+--------------------------------------------------------------------------------
+
+1. Set up the environment (Python 3.11+ was used to generate the committed
+   __pycache__ files, but any recent Python 3 should work):
+
+       pip install -r requirements.txt
+
+2. Refresh the canonical data tables from Eurostat (optional — the repo
+   already ships data/processed/*.parquet, so skip this unless you need
+   fresher data or a wider country scope):
+
+       python fetch_data.py
+       python fetch_data.py --geo IT DE FR --refresh   # wider scope example
+
+3. Rebuild the site's curated JSON export and preview it locally:
+
+       python build_site.py
+
+   This opens http://127.0.0.1:8731/ in a browser, serving docs/. Iterate on
+   HTML/CSS/JS with:
+
+       python build_site.py --no-build
+
+   and just refresh the browser.
+
+4. (Optional, standalone) Run the barrier-importance analysis:
+
+       python analyse_barriers.py
+
+   Produces the two CSVs in data/analysis/. Requires data/processed/
+   firm_level.parquet to exist already (step 2, or the version already
+   committed).
+
+5. To publish changes: commit both the code AND, if you changed the pipeline
+   or export.py, the regenerated data/processed/*.parquet(+datamap) and
+   docs/data/*.json — GitHub Pages serves docs/ from `main` with no
+   server-side build step, so stale committed JSON means the live page is
+   out of step with the code that claims to produce it. This is the single
+   most important operational gotcha in this repo.
+
+--------------------------------------------------------------------------------
+ 5. KEY CONCEPTS TO KNOW BEFORE CHANGING ANYTHING
+--------------------------------------------------------------------------------
+
+(Full detail in DATA_PIPELINE_SPEC.md — this is the "must know" shortlist.)
+
+- Two output tables, never merged: firm_level.parquet (one row per enterprise
+  observation) and individual_level.parquet (one row per person observation).
+  A percentage of businesses and a percentage of people are not comparable
+  quantities and must never be joined or concatenated.
+
+- `indicator` + `unit` together identify a metric — not `indicator` alone.
+  Several distinct metrics share one Eurostat indicator code and differ only
+  by `unit` (the base population the percentage is a share of).
+
+- Only `unit == PC_ENT` (share of ALL enterprises) may be multiplied by
+  `enterprise_count` to get an absolute number. Every other unit has a
+  narrower base population with no count column of its own — weighting it
+  invents a number.
+
+- Micro-enterprises (fewer than 10 employees) are never sampled by the ICT
+  surveys, even though they exist in the enterprise universe. Every "SME"
+  or "small firm" figure in this project implicitly excludes them.
+
+- Size-class bands overlap on purpose (SME_10_249 contains SMALL_10_49 +
+  MEDIUM_50_249; ALL_GE10 contains those plus LARGE_GE250) — they are not a
+  partition, and summing across them double-counts.
+
+- Sector rows are joined against an approximate denominator (the SBS
+  business-economy total, not the ICT survey's own population total) — see
+  DATA_PIPELINE_SPEC.md Caveat 3. Derived absolute sector figures are
+  estimates, not exact counts, and are labelled as such.
+
+- Nothing in this project claims causality. The barrier analysis in
+  particular measures association only, on a population (firms that
+  considered AI and declined) partly defined by the outcome itself — see
+  barrier_analysis.py's module docstring.
+
+--------------------------------------------------------------------------------
+ 6. WHERE TO GO NEXT
+--------------------------------------------------------------------------------
+
+  Question                                   Read
+  ------------------------------------------ --------------------------------
+  Why does this project exist / roadmap      README.md
+  Which file to touch for a given change     CODE_ARCHITECTURE.md
+  Exact schema, join logic, every caveat      DATA_PIPELINE_SPEC.md
+  The story the portal tells, for a reader   docs/documentation/index.html
+  Design rationale, visual rules             docs/documentation/design.html
+  Module-by-module code walkthrough          docs/documentation/code.html
+  Barrier-ranking methodology in full        sme_pipeline/barrier_analysis.py
+                                              (module docstring) and
+                                              analyse_barriers.py (docstring)
