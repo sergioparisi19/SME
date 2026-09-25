@@ -99,6 +99,7 @@ const state = {
 let SERIES = {};
 let LABELS = {};
 let META = {};
+let BARRIERS = {};
 const tooltip = document.createElement("div");
 let gradientSeq = 0;
 // Charts ask for the same slices many times while a page is rendered (tiles,
@@ -1330,6 +1331,92 @@ function comparisonCard(root, chartId, { title, note, indicators }) {
 }
 
 /**
+ * The three disjoint size tiers barrier_analysis.py fits a model for - the
+ * only bands this section has anything to say about. SME_10_249 and ALL_GE10
+ * overlap these and are deliberately excluded (see export.py's own SIZE_BANDS
+ * comment): pooling a tier with its own component tiers would double-count
+ * countries in the country-resampled bootstrap the model was validated with.
+ */
+const barrierTiers = () => facets().filter((f) => BARRIERS.tiers?.[f.bands[0]]);
+
+/**
+ * Which barriers separate high- from low-adoption countries within a tier -
+ * the EU-wide ranking from barrier_analysis.py, unaffected by the reader's
+ * country selection. One card per tier currently in view.
+ */
+function barrierRankingCard(root, { title }) {
+  barrierTiers().forEach((f) => {
+    const tierCode = f.bands[0];
+    const tier = BARRIERS.tiers[tierCode];
+    const items = Object.entries(tier.barriers)
+      .map(([code, b]) => ({ code, ...b }))
+      .sort((a, b) => b.share_pct - a.share_pct);
+
+    // The headline finding is usually that these two rankings disagree: a
+    // barrier can be cited at a similar, high rate everywhere regardless of
+    // a country's adoption level - which makes it a poor explainer of the
+    // GAP between countries, however common it is. Naming the contrast
+    // explicitly here means a reader hits it before the chart, not after.
+    const top = items[0];
+    const mostCited = [...items]
+      .filter((it) => it.exposure_eu27_pct != null)
+      .sort((a, b) => b.exposure_eu27_pct - a.exposure_eu27_pct)[0];
+    const contrast = (top?.exposure_eu27_pct != null && mostCited && mostCited.code !== top.code)
+      ? `${shortLabel(label("indicator", top.code), 40)} explains the largest share of the gap `
+        + `here, despite being cited by only ${fmt(top.exposure_eu27_pct, 0)}% of firms EU-wide — `
+        + `well behind ${shortLabel(label("indicator", mostCited.code), 40)} at `
+        + `${fmt(mostCited.exposure_eu27_pct, 0)}%. How often a barrier is cited and how much it `
+        + `explains why countries differ are different questions.`
+      : null;
+
+    // Flag the barriers where the raw, one-at-a-time correlation and the
+    // multivariate coefficient point opposite ways - the module's own note
+    // that this happens on 9 of 21 fitted rows. That disagreement means a
+    // barrier's simple, on-its-own relationship with adoption is not the one
+    // driving its share here; the rest agree, and stay the default colour
+    // rather than spending colour on the routine case.
+    const flagged = (it) => it.direction_marginal !== it.direction_in_model;
+    const anyFlagged = items.some(flagged);
+
+    card(root, {
+      title: `${title} — ${bandLabel(tierCode)}`,
+      note: [
+        contrast,
+        `Share of the adoption gap the model attributes to each barrier, fit on `
+          + `${tier.n_countries} countries, ${tier.years.join(", ")}. Association, not `
+          + `causation: barriers are measured only on firms that considered AI and `
+          + `declined, a population partly shaped by the outcome itself.`,
+        anyFlagged
+          ? "Bars in violet are where a barrier's raw, one-at-a-time relationship with "
+            + "adoption and its role in this multivariate model point opposite ways — "
+            + "read those with extra caution rather than at face value."
+          : null,
+        tier.published ? null
+          : "This tier's ranking is not stable under resampling — its leading barrier "
+            + "is close to a tie with the next. Read the order as uncertain, not settled.",
+      ].filter(Boolean).join(" "),
+      draw: (c) => rankedBars(c, items.map((it) => ({
+        code: it.code, label: shortLabel(label("indicator", it.code), 46),
+        value: it.share_pct,
+        color: flagged(it) ? "var(--series-3)" : undefined,
+      })), { unitNote: "share of the gap the barrier block explains" }),
+      table: () => ({
+        columns: [
+          "Barrier", "Share of explained gap", "90% interval", "Cited by, EU27",
+          "Direction (this model)", "Direction (on its own)",
+        ],
+        rows: items.map((it) => [
+          label("indicator", it.code), `${fmt(it.share_pct)}%`,
+          `${fmt(it.ci_low_pct)}–${fmt(it.ci_high_pct)}%`,
+          it.exposure_eu27_pct == null ? NOT_PUBLISHED : `${fmt(it.exposure_eu27_pct)}%`,
+          it.direction_in_model, it.direction_marginal,
+        ]),
+      }),
+    });
+  });
+}
+
+/**
  * Every value of the breakdown, ranked, for the current country selection.
  *
  * Sectors are nominal - no natural order - so this deliberately does NOT use
@@ -1529,6 +1616,12 @@ const VIEWS = {
         render: (r) => comparisonCard(r, "ai_barriers", {
           title: "Why enterprises do not adopt AI",
           note: "Shares of the companies that considered AI — not of all companies, which is the group every other chart here counts. Reasons are not exclusive." }) },
+      { id: "barrier-importance", part: "Why they don't", nav: "What actually matters",
+        h2: "Which barriers actually track the gap",
+        available: () => barrierTiers().length > 0,
+        deck: "Being widely cited and explaining the gap between countries are different things — a barrier can be cited more where adoption is higher. This reads the same survey through a model instead of a ranking.",
+        render: (r) => barrierRankingCard(r,
+          { title: "Which barriers separate high- from low-adoption countries" }) },
       { id: "foundations", part: "What is missing underneath", nav: "Digital foundations", h2: "Digital foundations underlying AI adoption",
         deck: "AI adoption is associated with broader digital maturity. This section reports cloud computing use, data analytics practice and overall digital intensity.",
         render: (r) => comparisonCard(r, "foundations", {
@@ -2134,11 +2227,12 @@ async function fetchBundle(name) {
 }
 
 async function loadData() {
-  const [series, labels, meta] = await Promise.all(
-    ["series", "labels", "meta"].map(fetchBundle));
+  const [series, labels, meta, barriers] = await Promise.all(
+    ["series", "labels", "meta", "barriers"].map(fetchBundle));
   SERIES = series;
   LABELS = labels;
   META = meta;
+  BARRIERS = barriers;
   QUERY_CACHE.clear();
   buildWeights();
 }

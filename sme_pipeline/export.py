@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .config import PROCESSED_DIR
+from .config import PROCESSED_DIR, PROJECT_ROOT
 
 # --- Page contract ----------------------------------------------------------
 
@@ -444,6 +444,80 @@ def build_labels(datamaps: dict[str, dict], used: dict[str, set[str]]) -> dict:
     }
 
 
+ANALYSIS_DIR = PROJECT_ROOT / "data" / "analysis"
+
+
+def build_barrier_model() -> dict:
+    """Curate the tier-level barrier-importance model for the dashboard.
+
+    Reads the Parquet artifact `analyse_barriers.py` writes - never recomputes
+    the fit here. The bootstrap Shapley decomposition takes several seconds;
+    calling it from inside export() would silently re-run it on every
+    build_site.py invocation, including ones that change nothing about the
+    data. Every other function in this module only curates already-computed
+    Parquet into JSON, and this follows the same rule.
+    """
+    parquet_path = ANALYSIS_DIR / "barrier_importance.parquet"
+    datamap_path = ANALYSIS_DIR / "barrier_importance.datamap.json"
+    if not parquet_path.exists() or not datamap_path.exists():
+        raise FileNotFoundError(
+            f"{parquet_path} is missing - run `python analyse_barriers.py` before "
+            "exporting the site, so the barrier-importance section has a model to read."
+        )
+
+    df = pd.read_parquet(parquet_path)
+    datamap = json.loads(datamap_path.read_text(encoding="utf-8"))
+
+    tiers: dict[str, dict] = {}
+    for tier_code, group in df.groupby("tier_code", sort=False):
+        first = group.iloc[0]
+        tiers[tier_code] = {
+            "published": bool(first["tier_published"]),
+            "n_cells": int(first["n_cells"]),
+            "n_countries": int(first["n_countries"]),
+            "years": first["years"].split(),
+            "delta_r2": float(first["delta_r2"]),
+            "r2_adjusted": float(first["r2_adjusted"]),
+            # Doesn't fit the flat tier x barrier grain of the Parquet table,
+            # so it's carried on the datamap instead - see analyse_barriers.py.
+            "context_by_year": datamap["model_context_by_year"][tier_code],
+            "barriers": {
+                row.barrier_code: {
+                    "share_pct": row.share_pct,
+                    "ci_low_pct": row.ci_low_pct,
+                    "ci_high_pct": row.ci_high_pct,
+                    "coefficient": row.coefficient,
+                    "direction_in_model": row.direction_in_model,
+                    # The raw, one-barrier-at-a-time correlation's direction -
+                    # compared against direction_in_model on the dashboard to
+                    # flag the barriers where the two disagree (see barrier_
+                    # analysis.py's own note: 9 of 21 rows do, in the fitted
+                    # data - a barrier can correlate with adoption alone and
+                    # work against it once the others are controlled).
+                    "direction_marginal": row.direction_marginal,
+                    # The reference point contribution_j = coefficient x
+                    # (avg_barrier_j - tier_mean_pct) is measured from - see
+                    # the dashboard's barrier-importance section.
+                    "tier_mean_pct": row.tier_mean_pct,
+                    # How widely cited the barrier is EU-wide - shown beside
+                    # share_pct so a reader sees the two are different axes,
+                    # not the same fact stated twice. A barrier can lead on
+                    # explanatory share while trailing on citation rate: it
+                    # moves sharply between high- and low-adoption countries,
+                    # rather than being cited at a similar, high rate in both.
+                    "exposure_eu27_pct": row.exposure_eu27_pct,
+                }
+                for row in group.itertuples()
+            },
+        }
+
+    return {
+        "generated_utc": datamap["generated_utc"],
+        "stability_threshold": datamap["source"]["stability_threshold"],
+        "tiers": tiers,
+    }
+
+
 def build_meta(datamaps: dict[str, dict]) -> dict:
     """Carry provenance and caveats onto the page rather than leaving them in the repo."""
     return {
@@ -487,6 +561,7 @@ def export(out_dir: Path = SITE_DATA_DIR) -> dict[str, int]:
             datamaps, {"firm": firm_used | sector_used, "individual": individual_used}
         ),
         "meta.json": build_meta(datamaps),
+        "barriers.json": build_barrier_model(),
     }
 
     out_dir.mkdir(parents=True, exist_ok=True)

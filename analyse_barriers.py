@@ -66,7 +66,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from sme_pipeline import barrier_analysis
+from sme_pipeline import barrier_analysis, load
 from sme_pipeline.config import PROCESSED_DIR, PROJECT_ROOT
 
 DEFAULT_OUT = PROJECT_ROOT / "data" / "analysis" / "barrier_importance.csv"
@@ -75,12 +75,48 @@ FIELDS = [
     "tier", "tier_code", "rank", "barrier", "barrier_full", "barrier_code",
     "share_pct", "ci_low_pct", "ci_high_pct", "first_place_rate",
     "direction_in_model", "coefficient", "direction_marginal", "corr_with_adoption",
-    "exposure_eu27_pct",
+    "tier_mean_pct", "exposure_eu27_pct",
     "n_cells", "n_countries", "years",
     "r2_years_only", "r2_with_barriers", "r2_adjusted", "delta_r2",
     "lead_share", "stability_threshold", "bootstrap_draws", "tier_published",
     "outcome_code", "outcome_unit", "exposure_unit", "generated_utc",
 ]
+
+# Prose for each FIELDS column, reused verbatim in the Parquet datamap below and
+# kept beside FIELDS so the two can't drift apart from one another.
+COLUMN_NOTES = {
+    "tier": "Size tier label.",
+    "tier_code": "Size tier code (SMALL_10_49, MEDIUM_50_249, LARGE_GE250) - the three disjoint bands the model is fit on.",
+    "rank": "The barrier's rank within its tier, 1 = largest Shapley share.",
+    "barrier": "Short barrier label.",
+    "barrier_full": "Eurostat's own full wording for the barrier.",
+    "barrier_code": "Eurostat indicator code for the barrier (unit PC_ENT_AI_EC).",
+    "share_pct": "The barrier's share of the R2 the barrier block adds beyond year effects. Shares sum to 100 within a tier.",
+    "ci_low_pct": "5th percentile of share_pct across bootstrap draws (whole countries resampled).",
+    "ci_high_pct": "95th percentile of share_pct across bootstrap draws.",
+    "first_place_rate": "Share of bootstrap draws in which this barrier ranked first in its tier.",
+    "direction_in_model": "Sign of the barrier's coefficient with the other six barriers and the year held constant.",
+    "coefficient": "The barrier's OLS coefficient in the fitted multivariate model - the one share_pct is decomposed from.",
+    "direction_marginal": "Sign of the barrier's raw, one-at-a-time correlation with adoption. Can disagree with direction_in_model.",
+    "corr_with_adoption": "Raw correlation between the barrier and the adoption rate, one barrier at a time.",
+    "tier_mean_pct": "The barrier's mean citation rate across the tier's country-year panel - the reference point contributions are measured from.",
+    "exposure_eu27_pct": "How widely the barrier is cited EU-wide (Eurostat's own EU27 aggregate), for context beside the share.",
+    "n_cells": "Country-year cells the tier's model was fit on.",
+    "n_countries": "Distinct countries in the tier's fitted panel.",
+    "years": "Survey years in the tier's fitted panel, space-separated.",
+    "r2_years_only": "R2 of a model with year effects only, no barriers.",
+    "r2_with_barriers": "R2 of the full model (year effects + all seven barriers).",
+    "r2_adjusted": "r2_with_barriers, adjusted for the number of parameters relative to n_cells.",
+    "delta_r2": "r2_with_barriers minus r2_years_only - what the barrier block adds beyond year effects. What share_pct is a share of.",
+    "lead_share": "Share of bootstrap draws in which this tier's actual top barrier led.",
+    "stability_threshold": "lead_share must meet or exceed this for tier_published to be true.",
+    "bootstrap_draws": "Number of country-resampled bootstrap draws the model was validated on.",
+    "tier_published": "False where the tier's leading barrier is not reliably leading across bootstrap draws - the ranking should not be presented as settled.",
+    "outcome_code": "Eurostat indicator code for the outcome (AI adoption).",
+    "outcome_unit": "Unit the outcome is measured in (share of all enterprises).",
+    "exposure_unit": "Unit the barriers are measured in (share of enterprises that considered AI).",
+    "generated_utc": "When this row was generated.",
+}
 
 TIER_NAMES = barrier_analysis.TIER_LABELS
 
@@ -109,6 +145,7 @@ def rows_from(result: dict, labels: dict[str, str], draws: int | None = None) ->
                 "direction_marginal": ("against adoption" if b["sign"] == -1
                                        else "with adoption"),
                 "corr_with_adoption": b["corr"],
+                "tier_mean_pct": model["tier_means"][code],
                 "exposure_eu27_pct": b.get("exposure_eu27"),
                 "n_cells": model["n"],
                 "n_countries": model["countries"],
@@ -142,6 +179,68 @@ def enrich_country(country: pd.DataFrame, result: dict) -> pd.DataFrame:
     out = country.copy()
     out["tier_ranking_stable"] = out["tier_code"].map(stable)
     return out
+
+
+def write_parquet_artifact(result: dict, rows: list[dict], draws: int, seed: int,
+                            out_dir: Path) -> None:
+    """Write the self-describing Parquet counterpart to barrier_importance.csv.
+
+    This is the artifact the site export reads to build the dashboard's
+    barrier-importance section - it deliberately does not reuse
+    sme_pipeline.datamap.build_one(), which is wired to the ICT-survey tables'
+    own column vocabulary (geo, size_emp, indicator, unit...) and would need
+    that vocabulary stretched to cover an unrelated table shape. This builds a
+    small datamap of its own instead, in the same spirit: self-describing,
+    with the caveats carried on the artifact rather than left in the repo.
+
+    Only called for the full, unrestricted panel (`--years` omitted) - the site
+    always scores against the all-years-pooled model, never a year-restricted
+    diagnostic run (see the module docstring for why pooling is the more
+    stable choice here).
+    """
+    df = pd.DataFrame(rows)[FIELDS]
+    datamap = {
+        "datamap_version": "1.0",
+        "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "table": {
+            "name": "barrier_importance",
+            "file": "barrier_importance.parquet",
+            "unit_of_observation": "one size tier crossed with one AI-adoption barrier",
+            "grain": "tier_code x barrier_code",
+            "rows": int(len(df)),
+            "primary_key": ["tier_code", "barrier_code"],
+        },
+        "source": {
+            "provider": "Eurostat (derived)",
+            "method": (
+                "Shapley decomposition of the R2 a 7-barrier OLS block adds to E_AI_TANY "
+                "beyond year effects, fit per size tier on the country-year panel, "
+                "validated by resampling whole countries."
+            ),
+            "script": "analyse_barriers.py, sme_pipeline/barrier_analysis.py",
+            "bootstrap_draws": draws,
+            "seed": seed,
+            "stability_threshold": barrier_analysis.STABILITY_THRESHOLD,
+        },
+        "columns": {name: {"note": note} for name, note in COLUMN_NOTES.items()},
+        # Per-tier year effect, keyed by tier then year - doesn't fit the flat
+        # tier x barrier grain above, so it lives here rather than as a
+        # repeated JSON-in-cell column on every row of the Parquet table.
+        "model_context_by_year": {
+            tier: model["context_by_year"] for tier, model in result["tiers"].items()
+        },
+        "caveats": [
+            "Association, not causation: the barrier percentages are measured only on "
+            "firms that considered AI and declined, a population partly defined by the "
+            "outcome itself. A positive association can be pure composition rather than "
+            "a driver.",
+            "tier_published is false where the tier's leading barrier is not reliably "
+            "leading across bootstrap draws - do not present that tier's ranking as "
+            "settled.",
+        ],
+    }
+    load.write_table(df, "barrier_importance", processed_dir=out_dir)
+    load.write_datamap(datamap, "barrier_importance", processed_dir=out_dir)
 
 
 def main() -> None:
@@ -200,6 +299,13 @@ def main() -> None:
     print(f"\nWrote {len(rows)} rows to {summary_path}")
     print(f"Wrote {len(country)} rows to {country_path} "
           f"({country.geo.nunique()} countries)\n")
+
+    # The Parquet artifact is what the site export reads; only the full,
+    # unrestricted panel is a fit the site should ever show.
+    if args.years is None:
+        write_parquet_artifact(result, rows, args.draws, args.seed, args.out_dir)
+        print(f"Wrote {args.out_dir / 'barrier_importance.parquet'} "
+              f"(+ .datamap.json) for the site export\n")
     for tier, model in result["tiers"].items():
         flag = "" if model["published"] else "   <- ranking NOT stable across draws"
         lead = max(model["barriers"].items(), key=lambda kv: kv[1]["share"])
