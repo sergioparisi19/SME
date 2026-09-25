@@ -424,7 +424,8 @@ def analyse(df: pd.DataFrame, draws: int = BOOTSTRAP_DRAWS, seed: int = SEED,
             continue
         corr = panel[BARRIERS].corrwith(panel["y"])
         eu = _eu_exposure(df, tier)
-        beta, *_ = _fit(panel)
+        beta, _, _, context_by_year = _fit(panel)
+        means = panel[BARRIERS].mean()
         boot = _bootstrap(panel, draws, seed)
 
         # Adjusted R2 is the honest statistic when the panel is short: seven
@@ -446,6 +447,15 @@ def analyse(df: pd.DataFrame, draws: int = BOOTSTRAP_DRAWS, seed: int = SEED,
             "r2_adjusted": round(adjusted, 3),
             "delta_r2": round(added, 3),
             "lead_share": round(boot["lead_share"], 3),
+            # The fixed reference point contributions are measured from
+            # (tier_means) and the year effect (context_by_year), exported so a
+            # caller can score an arbitrary country or country group against
+            # this same fitted model without refitting - see by_country() for
+            # the model this mirrors.
+            "tier_means": {code: round(float(means[code]), 2) for code in BARRIERS},
+            "context_by_year": {
+                str(year): round(float(value), 4) for year, value in context_by_year.items()
+            },
             "barriers": {
                 code: {
                     "share": round(100.0 * value / added, 1),

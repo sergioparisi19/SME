@@ -1,0 +1,142 @@
+{
+  "datamap_version": "1.0",
+  "generated_utc": "2026-09-25T20:15:10Z",
+  "table": {
+    "name": "barrier_importance",
+    "file": "barrier_importance.parquet",
+    "unit_of_observation": "one size tier crossed with one AI-adoption barrier",
+    "grain": "tier_code x barrier_code",
+    "rows": 21,
+    "primary_key": [
+      "tier_code",
+      "barrier_code"
+    ]
+  },
+  "source": {
+    "provider": "Eurostat (derived)",
+    "method": "Shapley decomposition of the R2 a 7-barrier OLS block adds to E_AI_TANY beyond year effects, fit per size tier on the country-year panel, validated by resampling whole countries.",
+    "script": "analyse_barriers.py, sme_pipeline/barrier_analysis.py",
+    "bootstrap_draws": 400,
+    "seed": 7,
+    "stability_threshold": 0.6
+  },
+  "columns": {
+    "tier": {
+      "note": "Size tier label."
+    },
+    "tier_code": {
+      "note": "Size tier code (SMALL_10_49, MEDIUM_50_249, LARGE_GE250) - the three disjoint bands the model is fit on."
+    },
+    "rank": {
+      "note": "The barrier's rank within its tier, 1 = largest Shapley share."
+    },
+    "barrier": {
+      "note": "Short barrier label."
+    },
+    "barrier_full": {
+      "note": "Eurostat's own full wording for the barrier."
+    },
+    "barrier_code": {
+      "note": "Eurostat indicator code for the barrier (unit PC_ENT_AI_EC)."
+    },
+    "share_pct": {
+      "note": "The barrier's share of the R2 the barrier block adds beyond year effects. Shares sum to 100 within a tier."
+    },
+    "ci_low_pct": {
+      "note": "5th percentile of share_pct across bootstrap draws (whole countries resampled)."
+    },
+    "ci_high_pct": {
+      "note": "95th percentile of share_pct across bootstrap draws."
+    },
+    "first_place_rate": {
+      "note": "Share of bootstrap draws in which this barrier ranked first in its tier."
+    },
+    "direction_in_model": {
+      "note": "Sign of the barrier's coefficient with the other six barriers and the year held constant."
+    },
+    "coefficient": {
+      "note": "The barrier's OLS coefficient in the fitted multivariate model - the one share_pct is decomposed from."
+    },
+    "direction_marginal": {
+      "note": "Sign of the barrier's raw, one-at-a-time correlation with adoption. Can disagree with direction_in_model."
+    },
+    "corr_with_adoption": {
+      "note": "Raw correlation between the barrier and the adoption rate, one barrier at a time."
+    },
+    "tier_mean_pct": {
+      "note": "The barrier's mean citation rate across the tier's country-year panel - the reference point contributions are measured from."
+    },
+    "exposure_eu27_pct": {
+      "note": "How widely the barrier is cited EU-wide (Eurostat's own EU27 aggregate), for context beside the share."
+    },
+    "n_cells": {
+      "note": "Country-year cells the tier's model was fit on."
+    },
+    "n_countries": {
+      "note": "Distinct countries in the tier's fitted panel."
+    },
+    "years": {
+      "note": "Survey years in the tier's fitted panel, space-separated."
+    },
+    "r2_years_only": {
+      "note": "R2 of a model with year effects only, no barriers."
+    },
+    "r2_with_barriers": {
+      "note": "R2 of the full model (year effects + all seven barriers)."
+    },
+    "r2_adjusted": {
+      "note": "r2_with_barriers, adjusted for the number of parameters relative to n_cells."
+    },
+    "delta_r2": {
+      "note": "r2_with_barriers minus r2_years_only - what the barrier block adds beyond year effects. What share_pct is a share of."
+    },
+    "lead_share": {
+      "note": "Share of bootstrap draws in which this tier's actual top barrier led."
+    },
+    "stability_threshold": {
+      "note": "lead_share must meet or exceed this for tier_published to be true."
+    },
+    "bootstrap_draws": {
+      "note": "Number of country-resampled bootstrap draws the model was validated on."
+    },
+    "tier_published": {
+      "note": "False where the tier's leading barrier is not reliably leading across bootstrap draws - the ranking should not be presented as settled."
+    },
+    "outcome_code": {
+      "note": "Eurostat indicator code for the outcome (AI adoption)."
+    },
+    "outcome_unit": {
+      "note": "Unit the outcome is measured in (share of all enterprises)."
+    },
+    "exposure_unit": {
+      "note": "Unit the barriers are measured in (share of enterprises that considered AI)."
+    },
+    "generated_utc": {
+      "note": "When this row was generated."
+    }
+  },
+  "model_context_by_year": {
+    "SMALL_10_49": {
+      "2021": 17.7201,
+      "2023": 15.5072,
+      "2024": 18.6988,
+      "2025": 24.1055
+    },
+    "MEDIUM_50_249": {
+      "2021": 10.176,
+      "2023": 6.5097,
+      "2024": 9.8251,
+      "2025": 18.6687
+    },
+    "LARGE_GE250": {
+      "2021": 8.9904,
+      "2023": 9.3047,
+      "2024": 22.5589,
+      "2025": 37.2463
+    }
+  },
+  "caveats": [
+    "Association, not causation: the barrier percentages are measured only on firms that considered AI and declined, a population partly defined by the outcome itself. A positive association can be pure composition rather than a driver.",
+    "tier_published is false where the tier's leading barrier is not reliably leading across bootstrap draws - do not present that tier's ranking as settled."
+  ]
+}
